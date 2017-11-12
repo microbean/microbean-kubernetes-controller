@@ -36,6 +36,7 @@ import org.junit.Test;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assume.assumeFalse;
 
+@Deprecated
 public class TestReflectorBasics {
 
   public TestReflectorBasics() {
@@ -54,10 +55,18 @@ public class TestReflectorBasics {
                       executorService,
                       Duration.ofSeconds(10));
     System.out.println("*** running reflector");
-    reflector.run(); // blocks
+    reflector.run();
+    Thread.sleep(10L * 60L * 1000L);
+    System.out.println("*** closing reflector");
+    reflector.close();
+    System.out.println("*** reflector closed");
     System.out.println("*** closing client");
     client.close();
-    
+    System.out.println("*** client closed");
+  }
+
+  public static final void main(final String[] args) throws Exception {
+    new TestReflectorBasics().testBasics();
   }
 
   private static final class StupidStore<T> implements Store<T> {

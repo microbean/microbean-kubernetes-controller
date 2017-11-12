@@ -16,7 +16,7 @@
  */
 package org.microbean.kubernetes.controller;
 
-import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
 
 // See https://github.com/kubernetes/client-go/blob/master/tools/cache/delta_fifo.go
@@ -26,15 +26,37 @@ public class Delta<T> {
   
   private final T object;
 
+  private final DeletedFinalStateUnknown deletedFinalStateUnknown;
+
   public Delta(final Type type, final T object) {
     super();
     this.type = Objects.requireNonNull(type);
     this.object = object;
+    this.deletedFinalStateUnknown = null;
+  }
+
+  Delta(final Type type, final DeletedFinalStateUnknown deletedFinalStateUnknown) {
+    super();
+    this.type = Objects.requireNonNull(type);
+    this.object = null;
+    this.deletedFinalStateUnknown = deletedFinalStateUnknown;
+  }
+
+  public final Type getType() {
+    return this.type;
+  }
+  
+  public final T getObject() {
+    return this.object;
+  }
+
+  final DeletedFinalStateUnknown getDeletedFinalStateUnknown() {
+    return this.deletedFinalStateUnknown;
   }
 
   public static interface Compressor<T> {
 
-    public Collection<Delta<T>> compress(final Collection<Delta<T>> deltas);
+    public List<Delta<T>> compress(final List<Delta<T>> deltas);
     
   }
   
@@ -42,6 +64,10 @@ public class Delta<T> {
     ADDED,
     UPDATED,
     DELETED,
+
+    /**
+     * Indicates a watch has expired and a new cycle has started, or you've turned on periodic syncs.
+     */
     SYNC;
   }
 

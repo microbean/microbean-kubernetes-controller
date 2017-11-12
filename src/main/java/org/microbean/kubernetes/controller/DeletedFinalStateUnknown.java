@@ -16,23 +16,6 @@
  */
 package org.microbean.kubernetes.controller;
 
-import java.util.Collection;
-import java.util.Set;
+interface DeletedFinalStateUnknown {
 
-import java.util.function.BiConsumer;
-
-import org.microbean.development.annotation.Experimental;
-
-@Experimental
-// See https://github.com/kubernetes/client-go/blob/master/tools/cache/fifo.go
-public interface QueueStore<T> extends Store<T> {
-
-  public T popAndProcessUsing(final BiConsumer<QueueStore<T>, T> processor);
-
-  public void addIfNotPresent(final T object);
-
-  public boolean hasSynced();
-
-  public void close();
-  
 }

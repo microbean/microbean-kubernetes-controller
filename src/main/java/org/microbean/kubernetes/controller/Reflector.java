@@ -16,6 +16,8 @@
  */
 package org.microbean.kubernetes.controller;
 
+import java.io.Closeable;
+
 import java.time.Duration;
 
 import java.time.temporal.ChronoUnit;
@@ -43,8 +45,8 @@ import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
 import io.fabric8.kubernetes.api.model.ListMeta;
 
-@SuppressWarnings("rawtypes")
-public class Reflector<T extends HasMetadata, L extends KubernetesResourceList> implements Runnable {
+@Deprecated
+public class Reflector<T extends HasMetadata, L extends KubernetesResourceList> implements Closeable, Runnable {
 
   private final MixedOperation<T, L, ?, ?> operation;
 
@@ -55,6 +57,8 @@ public class Reflector<T extends HasMetadata, L extends KubernetesResourceList> 
   private final ScheduledExecutorService resyncExecutorService;
 
   private final Duration resyncInterval;
+
+  private Watch watch;
   
   public Reflector(final Store<T> store,
                    final MixedOperation<T, L, ?, ?> operation,
@@ -90,36 +94,19 @@ public class Reflector<T extends HasMetadata, L extends KubernetesResourceList> 
     return true;
   }
 
-  private void resyncChan() {
-    // In the Go code, this effectively returns a timer.  That is, it
-    // returns a chan that will receive a message when the timer goes
-    // off.  Not entirely sure what the Java analog should be here;
-    // obviously there are many to choose from.
-    //
-    // {time passes}
-    //
-    // Probably ScheduledExecutorService.
-    //
-    // In the Go code, resyncChan returns the channel itself as well
-    // as a function used to stop the timer that will send a timeout
-    // message on that channel.
-    //
-    // Java is much, much simpler here: seems to me we can just
-    // schedule the task at a fixed rate.
-  }
-
   // Models the ListAndWatch func in the Go code.
   public void run() {
-    final L list = this.operation.list();
+    @SuppressWarnings("unchecked")
+    final KubernetesResourceList<? extends T> list = this.operation.list();
     assert list != null;
+
     final ListMeta metadata = list.getMetadata();
     assert metadata != null;
     
     final String resourceVersion = metadata.getResourceVersion();
     assert resourceVersion != null;
 
-    @SuppressWarnings("unchecked")
-    final List<? extends T> items = (List<? extends T>)list.getItems();
+    final List<? extends T> items = list.getItems();
     assert items != null;
     
     store.replace(new ArrayList<T>(items), resourceVersion);
@@ -140,11 +127,17 @@ public class Reflector<T extends HasMetadata, L extends KubernetesResourceList> 
       assert job != null;
     }
 
-    // Runs "forever"; fabric8 client takes care of reconnects, resource versions, etc.
-    try (final Watch watch = this.operation.withResourceVersion(resourceVersion).watch(new Watcher())) {
-        assert watch != null;
-    }
+    this.watch = this.operation.withResourceVersion(resourceVersion).watch(new Watcher());
+    assert this.watch != null;
 
+  }
+
+  @Override
+  public void close() {
+    final Watch watch = this.watch;
+    if (watch != null) {
+      watch.close();
+    }
   }
 
 
