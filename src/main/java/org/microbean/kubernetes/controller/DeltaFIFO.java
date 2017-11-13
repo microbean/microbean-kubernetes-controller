@@ -17,9 +17,14 @@
 package org.microbean.kubernetes.controller;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Set;
 import java.util.Objects;
 
 import java.util.concurrent.BlockingQueue;
@@ -43,53 +48,167 @@ public abstract class DeltaFIFO<T> implements QueueStore<T> {
   
   private final Delta.Compressor<T> compressor;
 
+  private final Map<String, T> knownObjects;
+
   private final Map<String, List<Delta<T>>> deltasByKey;
 
   private final BlockingQueue<String> queue;
 
   private final Object lock;
+
+  private boolean populated;
+
+  private int initialPopulationCount;
   
   public DeltaFIFO(final Function<T, String> keyFunction,
-                   final Delta.Compressor<T> compressor) {
+                   final Delta.Compressor<T> compressor,
+                   final Map<String, T> knownObjects) {
     super();
     this.lock = new byte[0];
     this.deltasByKey = new HashMap<>();
     this.queue = new LinkedBlockingQueue<>();
     this.keyFunction = Objects.requireNonNull(keyFunction);
     this.compressor = compressor;
+    if (knownObjects == null || knownObjects.isEmpty()) {
+      this.knownObjects = Collections.emptyMap();
+    } else {
+      this.knownObjects = new HashMap<>(knownObjects);
+    }
 
   }
 
   @Override
   public void add(final T object) {
     synchronized (lock) {
+      this.populated = true;
       this.enqueue(ADDED, object);
     }    
   }
 
   @Override
+  public void addIfNotPresent(final List<Delta<T>> deltas) {
+    Objects.requireNonNull(deltas);
+    final Delta<T> newest = deltas.get(deltas.size() - 1);
+    final String key = this.getKey(newest);
+    synchronized (lock) {
+      this.populated = true;
+      if (!this.deltasByKey.containsKey(key)) {
+        this.deltasByKey.put(key, deltas);
+        this.queue.add(key);
+      }
+    }
+  }
+
+  @Override
   public void update(final T object) {
     synchronized (lock) {
+      this.populated = true;
       this.enqueue(UPDATED, object);
     }
   }
 
-  public String getKey(final T object) {
+  @Override
+  public void replace(final Collection<? extends T> objects, final String ignoredResourceVersion) {
+    Objects.requireNonNull(objects);
+    Objects.requireNonNull(resourceVersion);
+    synchronized (lock) {
+
+      final Set<String> keys = new HashSet<>();
+      for (final T object : objects) {
+        final String key = this.getKey(object);
+        keys.add(key);
+      }
+
+      if (this.knownObjects == null || this.knownObjects.isEmpty()) {
+        final Collection<Entry<String, List<Delta<T>>>> entrySet = this.deltasByKey.entrySet();
+        if (entrySet != null && !entrySet.isEmpty()) {
+          for (final Entry<String, List<Delta<T>>> entry : entrySet) {
+            assert entry != null;
+            final String key = entry.getKey();
+            if (!keys.contains(key)) {
+              final List<Delta<T>> deltas = entry.getValue();
+              assert deltas != null;
+              final Delta<T> newestDelta = deltas.get(deltas.size() - 1);
+              assert newestDelta != null;
+              final T deletedObject = newestDelta.getObject();
+              assert deletedObject != null;
+              this.enqueue(new DeletedFinalStateUnknown<>(key, deletedObject));
+              if (!this.populated) {
+                this.populated = true;
+                this.initialPopulationCount = objects.size();
+              }
+            }
+          }
+        }
+      } else {
+        int queuedDeletions = 0;
+        final Set<Entry<String, T>> entrySet = this.knownObjects.entrySet();
+        if (entrySet != null && !entrySet.isEmpty()) {
+          for (final Entry<String, T> entry : entrySet) {
+            assert entry != null;
+            final String knownKey = entry.getKey();
+            assert knownKey != null;
+            if (!keys.contains(knownKey)) {
+              final T deletedObject = entry.getValue();
+              queuedDeletions++;
+              this.enqueue(new DeletedFinalStateUnknown<>(knownKey, deletedObject));
+            }
+          }
+        }
+        if (!this.populated) {
+          this.populated = true;
+          this.initialPopulationCount = objects.size() + queuedDeletions;
+        }
+      }
+    }
+  }
+
+  public String getKey(Object object) {
     String returnValue = null;
     if (this.keyFunction != null) {
-      returnValue = this.keyFunction.apply(object);
+      if (object instanceof List) {
+        final List<?> objects = (List<?>)object;
+        object = objects.get(objects.size() - 1);
+      }
+      if (object instanceof Delta) {
+        @SuppressWarnings("unchecked")
+        final Delta<T> delta = (Delta<T>)object;
+        final DeletedFinalStateUnknown<T> deletedObject = delta.getDeletedFinalStateUnknown();
+        if (deletedObject == null) {
+          returnValue = this.keyFunction.apply(delta.getObject());
+        } else {
+          returnValue = deletedObject.getKey();
+        }
+      } else if (object instanceof DeletedFinalStateUnknown) {
+        returnValue = ((DeletedFinalStateUnknown)object).getKey();
+      }
     }
     return returnValue;
   }
 
   private final void enqueue(final Type type, final T object) {
+    Objects.requireNonNull(type);
+    Objects.requireNonNull(object);
+    this.enqueue(new Delta<T>(type, object));
+  }
+
+  private final void enqueue(final DeletedFinalStateUnknown<T> deletedObject) {
+    Objects.requireNonNull(deletedObject);
+    this.enqueue(new Delta<T>(DELETED, deletedObject));
+  }
+
+  private final void enqueue(final Delta<T> delta) {
+    Objects.requireNonNull(delta);
     assert Thread.holdsLock(this.lock);
+    final Type type = delta.getType();
+    assert type != null;
+    final T object = delta.getObject();
+    assert object != null;
     final String key = this.getKey(object);
     if (SYNC.equals(type) && willObjectBeDeleted(key)) {
       return;
     }
 
-    final Delta<T> delta = new Delta<>(type, object);
     List<Delta<T>> deltas = this.deltasByKey.get(key);
     if (deltas == null) {
       deltas = new ArrayList<>();

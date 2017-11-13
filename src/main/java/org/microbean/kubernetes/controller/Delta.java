@@ -26,7 +26,7 @@ public class Delta<T> {
   
   private final T object;
 
-  private final DeletedFinalStateUnknown deletedFinalStateUnknown;
+  private final DeletedFinalStateUnknown<T> deletedFinalStateUnknown;
 
   public Delta(final Type type, final T object) {
     super();
@@ -35,7 +35,7 @@ public class Delta<T> {
     this.deletedFinalStateUnknown = null;
   }
 
-  Delta(final Type type, final DeletedFinalStateUnknown deletedFinalStateUnknown) {
+  Delta(final Type type, final DeletedFinalStateUnknown<T> deletedFinalStateUnknown) {
     super();
     this.type = Objects.requireNonNull(type);
     this.object = null;
@@ -50,7 +50,7 @@ public class Delta<T> {
     return this.object;
   }
 
-  final DeletedFinalStateUnknown getDeletedFinalStateUnknown() {
+  final DeletedFinalStateUnknown<T> getDeletedFinalStateUnknown() {
     return this.deletedFinalStateUnknown;
   }
 

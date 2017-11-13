@@ -17,6 +17,7 @@
 package org.microbean.kubernetes.controller;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Set;
 
 import java.util.function.BiConsumer;
@@ -29,7 +30,7 @@ public interface QueueStore<T> extends Store<T> {
 
   public T popAndProcessUsing(final BiConsumer<QueueStore<T>, T> processor);
 
-  public void addIfNotPresent(final T object);
+  public void addIfNotPresent(final List<Delta<T>> object);
 
   public boolean hasSynced();
 

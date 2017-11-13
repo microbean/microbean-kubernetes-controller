@@ -16,6 +16,26 @@
  */
 package org.microbean.kubernetes.controller;
 
-interface DeletedFinalStateUnknown {
+import java.util.Objects;
 
+final class DeletedFinalStateUnknown<T> {
+
+  private final String key;
+
+  private final T object;
+  
+  DeletedFinalStateUnknown(final String key, final T object) {
+    super();
+    this.key = Objects.requireNonNull(key);
+    this.object = object; // null is explicitly permitted
+  }
+
+  final String getKey() {
+    return this.key;
+  }
+
+  final T getObject() {
+    return this.object;
+  }
+  
 }
