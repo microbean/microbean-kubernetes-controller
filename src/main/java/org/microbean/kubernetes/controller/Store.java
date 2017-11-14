@@ -23,7 +23,7 @@ import org.microbean.development.annotation.Experimental;
 
 @Experimental
 // See https://github.com/kubernetes/client-go/blob/master/tools/cache/store.go
-public interface Store<T> {
+public interface Store<T, R> {
 
   public void add(final T object);
 
@@ -35,6 +35,10 @@ public interface Store<T> {
 
   public Set<String> listKeys(); // keySet
 
+  public R get(final T object);
+
+  public R getByKey(final String key);
+  
   public boolean contains(final T object);
 
   public boolean containsKey(final String key);
@@ -42,5 +46,5 @@ public interface Store<T> {
   public void replace(final Collection<? extends T> objects, final String resourceVersion);
 
   public void resync();
-  
+
 }

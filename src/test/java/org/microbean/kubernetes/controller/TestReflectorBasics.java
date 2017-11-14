@@ -20,6 +20,7 @@ import java.time.Duration;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 
 import java.util.concurrent.Executors;
@@ -49,8 +50,8 @@ public class TestReflectorBasics {
     final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(2);
     assertNotNull(executorService);
     final DefaultKubernetesClient client = new DefaultKubernetesClient();
-    final Reflector<Pod, PodList> reflector =
-      new Reflector<>(new StupidStore<Pod>(),
+    final Reflector<Pod, PodList, List<Delta<Pod>>> reflector =
+      new Reflector<>(new StupidStore<Pod, List<Delta<Pod>>>(),
                       client.pods(),
                       executorService,
                       Duration.ofSeconds(10));
@@ -69,13 +70,25 @@ public class TestReflectorBasics {
     new TestReflectorBasics().testBasics();
   }
 
-  private static final class StupidStore<T> implements Store<T> {
+  private static final class StupidStore<T, L> implements Store<T, L> {
 
     @Override
     public void add(final T object) {
       System.out.println("*** add: " + object);
     }
 
+    @Override
+    public L get(final T object) {
+      System.out.println("*** get");
+      return null;
+    }
+
+    @Override
+    public L getByKey(final String key) {
+      System.out.println("*** getByKey");
+      return null;
+    }
+    
     @Override
     public void update(final T object) {
       System.out.println("*** update: " + object);

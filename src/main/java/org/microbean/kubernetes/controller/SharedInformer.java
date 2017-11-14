@@ -25,22 +25,22 @@ import java.util.function.Supplier;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 
-public class SharedInformer<T> implements Runnable {
+public class SharedInformer<T, L> implements Runnable {
 
-  private final Store<T> store;
+  private final Store<T, L> store;
 
   private boolean hasSynced;
 
   private volatile String lastSyncResourceVersion;
   
-  public SharedInformer(final Store<T> store,
+  public SharedInformer(final Store<T, L> store,
                         final Supplier<? extends List<? extends T>> listFunction,
                         final Function<Watcher<T>, Watch> watchFunction) {
     super();
     this.store = Objects.requireNonNull(store);
   }
 
-  public final Store<T> getStore() {
+  public final Store<T, L> getStore() {
     return this.store;
   }
 

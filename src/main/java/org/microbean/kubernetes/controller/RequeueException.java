@@ -16,24 +16,16 @@
  */
 package org.microbean.kubernetes.controller;
 
-import java.util.Collection;
-import java.util.List;
-import java.util.Set;
+public class RequeueException extends RuntimeException {
 
-import java.util.function.BiConsumer;
+  private static final long serialVersionUID = 1L;
 
-import org.microbean.development.annotation.Experimental;
+  public RequeueException(final String message, final Throwable cause) {
+    super(message, cause);
+  }
 
-@Experimental
-// See https://github.com/kubernetes/client-go/blob/master/tools/cache/fifo.go
-public interface QueueStore<T, L> extends Store<T, L> {
-
-  public L popAndProcessUsing(final BiConsumer<QueueStore<T, L>, L> processor) throws InterruptedException;
-
-  public void addIfNotPresent(final L object);
-
-  public boolean hasSynced();
-
-  public void close();
+  public RequeueException(final Throwable cause) {
+    super(cause);
+  }
   
 }

@@ -21,16 +21,24 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Queue;
 import java.util.Set;
 import java.util.Objects;
 
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+import java.util.function.BiConsumer;
 import java.util.function.Function;
+
+import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.api.model.ObjectMeta;
 
 import org.microbean.kubernetes.controller.Delta.Type;
 
@@ -40,7 +48,7 @@ import static org.microbean.kubernetes.controller.Delta.Type.SYNC;
 import static org.microbean.kubernetes.controller.Delta.Type.UPDATED;
 
 // See https://github.com/kubernetes/client-go/blob/master/tools/cache/delta_fifo.go
-public abstract class DeltaFIFO<T> implements QueueStore<T> {
+public class DeltaFIFO<T> implements QueueStore<T, List<Delta<T>>> {
 
   private static final long serialVersionUID = 1L;
 
@@ -52,37 +60,182 @@ public abstract class DeltaFIFO<T> implements QueueStore<T> {
 
   private final Map<String, List<Delta<T>>> deltasByKey;
 
-  private final BlockingQueue<String> queue;
+  private final Queue<String> queue;
 
-  private final Object lock;
+  private final ReentrantReadWriteLock lock;
+
+  private final Lock readLock;
+
+  private final Lock writeLock;
+
+  private final Condition queueIsNotEmpty;
 
   private boolean populated;
 
   private int initialPopulationCount;
-  
+
+  public DeltaFIFO() {
+    super();
+    this.lock = new ReentrantReadWriteLock();
+    this.readLock = this.lock.readLock();
+    this.writeLock = this.lock.writeLock();
+    this.queueIsNotEmpty = this.writeLock.newCondition();
+    this.deltasByKey = new HashMap<>();
+    this.queue = new LinkedList<>();
+    this.keyFunction = DeltaFIFO::deletionHandlingNamespaceKeyFunction;
+    this.compressor = null;
+    this.knownObjects = null;
+  }
+    
   public DeltaFIFO(final Function<T, String> keyFunction,
                    final Delta.Compressor<T> compressor,
                    final Map<String, T> knownObjects) {
     super();
-    this.lock = new byte[0];
+    this.lock = new ReentrantReadWriteLock();
+    this.readLock = this.lock.readLock();
+    this.writeLock = this.lock.writeLock();
+    this.queueIsNotEmpty = this.writeLock.newCondition();
     this.deltasByKey = new HashMap<>();
-    this.queue = new LinkedBlockingQueue<>();
+    this.queue = new LinkedList<>();
     this.keyFunction = Objects.requireNonNull(keyFunction);
     this.compressor = compressor;
-    if (knownObjects == null || knownObjects.isEmpty()) {
+    if (knownObjects == null) {
+      this.knownObjects = null;
+    } else if (knownObjects.isEmpty()) {
       this.knownObjects = Collections.emptyMap();
     } else {
-      this.knownObjects = new HashMap<>(knownObjects);
+      this.knownObjects = Collections.unmodifiableMap(new HashMap<>(knownObjects));
     }
 
   }
 
   @Override
+  public void close() {
+    // TODO: figure out what this means given that Java queues don't close
+  }
+
+  public boolean isClosed() {
+    return false;
+  }
+
+  @Override
+  public boolean hasSynced() {
+    this.readLock.lock();
+    try {
+      return this.populated && this.initialPopulationCount == 0;
+    } finally {
+      this.readLock.unlock();
+    }
+  }
+
+  @Override
+  public boolean contains(final T object) {
+    boolean returnValue = false;
+    if (object != null) {
+      this.readLock.lock();
+      try {
+        returnValue = this.deltasByKey.containsKey(this.getKey(object));
+      } finally {
+        this.readLock.unlock();
+      }
+    }
+    return returnValue;
+  }
+
+  @Override
+  public boolean containsKey(final String key) {
+    this.readLock.lock();
+    try {
+      return key != null && this.deltasByKey.containsKey(key);
+    } finally {
+      this.readLock.unlock();
+    }
+  }
+
+  @Override
+  public List<T> list() {
+    final List<T> returnValue;
+    this.readLock.lock();
+    try {
+      if (this.deltasByKey.isEmpty()) {
+        returnValue = Collections.emptyList();
+      } else {
+        final Collection<List<Delta<T>>> deltasCollection = this.deltasByKey.values();
+        assert deltasCollection != null;
+        assert !deltasCollection.isEmpty();
+        returnValue = new ArrayList<>();
+        for (final List<Delta<T>> deltas : deltasCollection) {
+          assert deltas != null;
+          final Delta<T> newest = deltas.get(deltas.size() -1);
+          assert newest != null;
+          returnValue.add(newest.getObject());
+        }
+      }
+    } finally {
+      this.readLock.unlock();
+    }
+    return Collections.unmodifiableList(returnValue);
+  }
+
+  @Override
+  public Set<String> listKeys() {
+    final Set<String> returnValue;
+    this.readLock.lock();
+    try {
+      if (this.deltasByKey.isEmpty()) {
+        returnValue = Collections.emptySet();
+      } else {
+        returnValue = Collections.unmodifiableSet(new HashSet<>(this.deltasByKey.keySet()));
+      }
+    } finally {
+      this.readLock.unlock();
+    }
+    return returnValue;
+  }
+    
+  @Override
+  public List<Delta<T>> get(final T object) {
+    final List<Delta<T>> returnValue;
+    if (object == null) {
+      returnValue = null;
+    } else {
+      returnValue = this.getByKey(this.getKey(object));
+    }
+    return returnValue;
+  }
+
+  @Override
+  public List<Delta<T>> getByKey(final String key) {
+    final List<Delta<T>> returnValue;
+    if (key == null) {
+      returnValue = null;
+    } else {
+      this.readLock.lock();
+      try {
+        final List<Delta<T>> deltas = this.deltasByKey.get(key);
+        if (deltas == null) {
+          returnValue = null;
+        } else if (deltas.isEmpty()) {
+          returnValue = Collections.emptyList();
+        } else {
+          returnValue = new ArrayList<>(deltas);
+        }
+      } finally {
+        this.readLock.unlock();
+      }
+    }
+    return returnValue;
+  }
+    
+  @Override
   public void add(final T object) {
-    synchronized (lock) {
+    this.writeLock.lock();
+    try {
       this.populated = true;
       this.enqueue(ADDED, object);
-    }    
+    } finally {
+      this.writeLock.unlock();
+    }
   }
 
   @Override
@@ -90,36 +243,56 @@ public abstract class DeltaFIFO<T> implements QueueStore<T> {
     Objects.requireNonNull(deltas);
     final Delta<T> newest = deltas.get(deltas.size() - 1);
     final String key = this.getKey(newest);
-    synchronized (lock) {
+    if (key == null) {
+      throw new IllegalArgumentException("Unable to get key for " + newest);
+    }
+    this.addIfNotPresent(key, deltas);
+  }
+
+  private final void addIfNotPresent(final String key, final List<Delta<T>> deltas) {
+    Objects.requireNonNull(key);
+    Objects.requireNonNull(deltas);
+    this.writeLock.lock();
+    try {
       this.populated = true;
-      if (!this.deltasByKey.containsKey(key)) {
+      if (!this.deltasByKey.containsKey(key)) {        
         this.deltasByKey.put(key, deltas);
         this.queue.add(key);
+        this.queueIsNotEmpty.signal();
       }
+    } finally {
+      this.writeLock.unlock();
     }
   }
 
   @Override
   public void update(final T object) {
-    synchronized (lock) {
+    this.writeLock.lock();
+    try {
       this.populated = true;
       this.enqueue(UPDATED, object);
+    } finally {
+      this.writeLock.unlock();
     }
   }
 
   @Override
   public void replace(final Collection<? extends T> objects, final String ignoredResourceVersion) {
     Objects.requireNonNull(objects);
-    Objects.requireNonNull(resourceVersion);
-    synchronized (lock) {
+
+    this.writeLock.lock();
+    try {
 
       final Set<String> keys = new HashSet<>();
       for (final T object : objects) {
         final String key = this.getKey(object);
+        if (key == null) {
+          throw new IllegalArgumentException("Unable to get key for " + object);
+        }
         keys.add(key);
       }
 
-      if (this.knownObjects == null || this.knownObjects.isEmpty()) {
+      if (this.knownObjects == null) {
         final Collection<Entry<String, List<Delta<T>>>> entrySet = this.deltasByKey.entrySet();
         if (entrySet != null && !entrySet.isEmpty()) {
           for (final Entry<String, List<Delta<T>>> entry : entrySet) {
@@ -160,7 +333,97 @@ public abstract class DeltaFIFO<T> implements QueueStore<T> {
           this.initialPopulationCount = objects.size() + queuedDeletions;
         }
       }
+    } finally {
+      this.writeLock.unlock();
     }
+  }
+
+  @Override
+  public void delete(final T object) {
+    Objects.requireNonNull(object);
+    final String key = this.getKey(object);
+    this.writeLock.lock();
+    try {
+      this.populated = true;
+      if (this.deltasByKey.containsKey(key) || (this.knownObjects != null && this.knownObjects.containsKey(key))) {
+        this.enqueue(DELETED, object);
+      }
+    } finally {
+      this.writeLock.unlock();
+    }
+  }
+
+  @Override
+  public void resync() {
+    this.writeLock.lock();
+    try {
+      if (this.knownObjects != null && !this.knownObjects.isEmpty()) {
+        final Set<Entry<String, T>> entrySet = this.knownObjects.entrySet();
+        if (entrySet != null && !entrySet.isEmpty()) {
+          for (final Entry<String, T> entry : entrySet) {
+            assert entry != null;
+            final String knownKey = entry.getKey();
+            assert knownKey != null;
+            final T knownObject = entry.getValue();
+            assert knownObject != null;
+            final String key = this.getKey(knownObject);
+            final List<Delta<T>> deltas = this.deltasByKey.get(key);
+            if (deltas == null || deltas.isEmpty()) {
+              this.enqueue(SYNC, knownObject);
+            }
+          }
+        }
+      }
+    } finally {
+      this.writeLock.unlock();
+    }
+  }
+
+  @Override
+  public List<Delta<T>> popAndProcessUsing(final BiConsumer<QueueStore<T, List<Delta<T>>>, List<Delta<T>>> processor) throws InterruptedException {
+    Objects.requireNonNull(processor);
+    List<Delta<T>> returnValue = null;
+    this.writeLock.lock();
+    try {
+      PROCESSING_LOOP:
+      while (returnValue == null) {
+        while (this.queue.isEmpty()) {
+          if (this.isClosed()) {
+            break PROCESSING_LOOP;
+          }
+          this.queueIsNotEmpty.await();
+        }
+        final String key = this.queue.remove(); // will throw NoSuchElementException if the queue is empty; we've guarded against that
+        final List<Delta<T>> deltas = this.deltasByKey.get(key);
+        if (this.initialPopulationCount > 0) {
+          this.initialPopulationCount--;
+        }
+        if (deltas != null) {
+          this.deltasByKey.remove(key);
+          try {
+            processor.accept(this, Collections.unmodifiableList(deltas));
+          } catch (final RequeueException requeueException) {
+            this.addIfNotPresent(key, deltas);
+            final Throwable cause = requeueException.getCause();
+            if (cause instanceof RuntimeException) {
+              throw (RuntimeException)cause;
+            } else if (cause instanceof InterruptedException) {
+              Thread.currentThread().interrupt();
+              throw (InterruptedException)cause;
+            } else if (cause instanceof Error) {
+              throw (Error)cause;
+            } else if (cause instanceof Exception) {
+              throw new IllegalStateException(cause.getMessage(), cause);
+            }
+          }
+          returnValue = deltas;
+          assert returnValue != null;
+        }
+      }
+    } finally {
+      this.writeLock.unlock();
+    }
+    return returnValue;
   }
 
   public String getKey(Object object) {
@@ -199,30 +462,43 @@ public abstract class DeltaFIFO<T> implements QueueStore<T> {
 
   private final void enqueue(final Delta<T> delta) {
     Objects.requireNonNull(delta);
-    assert Thread.holdsLock(this.lock);
+    assert this.lock.isWriteLockedByCurrentThread();
+
     final Type type = delta.getType();
     assert type != null;
+
     final T object = delta.getObject();
     assert object != null;
+
     final String key = this.getKey(object);
+    if (key == null) {
+      throw new IllegalArgumentException("Unable to get key for " + object);
+    }
+
     if (SYNC.equals(type) && willObjectBeDeleted(key)) {
+      // EXIT POINT
       return;
     }
 
     List<Delta<T>> deltas = this.deltasByKey.get(key);
+    final boolean exists;
     if (deltas == null) {
+      exists = false;
       deltas = new ArrayList<>();
+    } else {
+      exists = true;
     }
+    deltas.add(delta);
     deltas = deduplicateDeltas(deltas);
     if (this.compressor != null) {
       deltas = this.compressor.compress(deltas);
     }
 
-    final boolean exists = this.deltasByKey.containsKey(key);
     if (deltas != null && !deltas.isEmpty()) {
       this.deltasByKey.put(key, deltas);
       if (!exists) {
         this.queue.add(key);
+        this.queueIsNotEmpty.signal();
       }
     } else if (exists) {
       this.deltasByKey.remove(key);
@@ -266,49 +542,37 @@ public abstract class DeltaFIFO<T> implements QueueStore<T> {
   }
   
   private final boolean willObjectBeDeleted(final String key) {
-    assert Thread.holdsLock(this.lock);
+    assert this.lock.isWriteLockedByCurrentThread();
     final List<Delta<T>> deltas = this.deltasByKey.get(key);
     return deltas != null && !deltas.isEmpty() && deltas.get(deltas.size() - 1).getType().equals(DELETED);
   }
 
-  /*
-// queueActionLocked appends to the delta list for the object, calling
-// f.deltaCompressor if needed. Caller must lock first.
-func (f *DeltaFIFO) queueActionLocked(actionType DeltaType, obj interface{}) error {
-	id, err := f.KeyOf(obj)
-	if err != nil {
-		return KeyError{obj, err}
-	}
+  public static final String deletionHandlingNamespaceKeyFunction(final Object object) {
+    Objects.requireNonNull(object);
+    String returnValue = null;
+    if (object instanceof DeletedFinalStateUnknown) {
+      returnValue = ((DeletedFinalStateUnknown<?>)object).getKey();
+    } else {
+      returnValue = namespaceKeyFunction(object);
+    }
+    return returnValue;
+  }
 
-	// If object is supposed to be deleted (last event is Deleted),
-	// then we should ignore Sync events, because it would result in
-	// recreation of this object.
-	if actionType == Sync && f.willObjectBeDeletedLocked(id) {
-		return nil
-	}
-
-	newDeltas := append(f.items[id], Delta{actionType, obj})
-	newDeltas = dedupDeltas(newDeltas)
-	if f.deltaCompressor != nil {
-		newDeltas = f.deltaCompressor.Compress(newDeltas)
-	}
-
-	_, exists := f.items[id]
-	if len(newDeltas) > 0 {
-		if !exists {
-			f.queue = append(f.queue, id)
-		}
-		f.items[id] = newDeltas
-		f.cond.Broadcast()
-	} else if exists {
-		// The compression step removed all deltas, so
-		// we need to remove this from our map (extra items
-		// in the queue are ignored if they are not in the
-		// map).
-		delete(f.items, id)
-	}
-	return nil
-}
-  */
+  public static final String namespaceKeyFunction(final Object object) {
+    Objects.requireNonNull(object);
+    String returnValue = null;
+    if (object instanceof HasMetadata) {
+      final ObjectMeta metadata = ((HasMetadata)object).getMetadata();
+      if (metadata != null) {
+        final String namespace = metadata.getNamespace();
+        if (namespace == null || namespace.isEmpty()) {
+          returnValue = metadata.getName();
+        } else {
+          returnValue = new StringBuilder(namespace).append("/").append(metadata.getName()).toString();
+        }
+      }
+    }
+    return returnValue;
+  }
   
 }

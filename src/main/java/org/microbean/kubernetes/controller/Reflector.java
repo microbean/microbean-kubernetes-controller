@@ -45,12 +45,11 @@ import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
 import io.fabric8.kubernetes.api.model.ListMeta;
 
-@Deprecated
-public class Reflector<T extends HasMetadata, L extends KubernetesResourceList> implements Closeable, Runnable {
+public class Reflector<T extends HasMetadata, L extends KubernetesResourceList, D> implements Closeable, Runnable {
 
   private final MixedOperation<T, L, ?, ?> operation;
 
-  private final Store<T> store;
+  private final Store<T, D> store;
   
   private volatile String lastSyncResourceVersion;
 
@@ -60,7 +59,7 @@ public class Reflector<T extends HasMetadata, L extends KubernetesResourceList> 
 
   private Watch watch;
   
-  public Reflector(final Store<T> store,
+  public Reflector(final Store<T, D> store,
                    final MixedOperation<T, L, ?, ?> operation,
                    final ScheduledExecutorService resyncExecutorService,
                    final Duration resyncInterval) {
