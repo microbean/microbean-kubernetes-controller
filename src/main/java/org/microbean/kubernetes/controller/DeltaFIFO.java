@@ -32,6 +32,7 @@ import java.util.Objects;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import java.util.function.BiConsumer;
@@ -68,8 +69,12 @@ public class DeltaFIFO<T> implements QueueStore<T, List<Delta<T>>> {
 
   private final Lock writeLock;
 
+  private final Lock closeLock;
+    
   private final Condition queueIsNotEmpty;
 
+  private boolean closed;
+    
   private boolean populated;
 
   private int initialPopulationCount;
@@ -80,6 +85,7 @@ public class DeltaFIFO<T> implements QueueStore<T, List<Delta<T>>> {
     this.readLock = this.lock.readLock();
     this.writeLock = this.lock.writeLock();
     this.queueIsNotEmpty = this.writeLock.newCondition();
+    this.closeLock = new ReentrantLock();
     this.deltasByKey = new HashMap<>();
     this.queue = new LinkedList<>();
     this.keyFunction = DeltaFIFO::deletionHandlingNamespaceKeyFunction;
@@ -95,6 +101,7 @@ public class DeltaFIFO<T> implements QueueStore<T, List<Delta<T>>> {
     this.readLock = this.lock.readLock();
     this.writeLock = this.lock.writeLock();
     this.queueIsNotEmpty = this.writeLock.newCondition();
+    this.closeLock = new ReentrantLock();
     this.deltasByKey = new HashMap<>();
     this.queue = new LinkedList<>();
     this.keyFunction = Objects.requireNonNull(keyFunction);
@@ -111,15 +118,26 @@ public class DeltaFIFO<T> implements QueueStore<T, List<Delta<T>>> {
 
   @Override
   public void close() {
-    // TODO: figure out what this means given that Java queues don't close
+    this.closeLock.lock();
+    try {
+      this.closed = true;
+      this.queueIsNotEmpty.signal();
+    } finally {
+      this.closeLock.unlock();
+    }
   }
 
   public boolean isClosed() {
-    return false;
+    this.closeLock.lock();
+    try {
+      return this.closed;
+    } finally {
+      this.closeLock.unlock();
+    }
   }
 
   @Override
-  public boolean hasSynced() {
+  public boolean getHasSynced() {
     this.readLock.lock();
     try {
       return this.populated && this.initialPopulationCount == 0;

@@ -16,26 +16,10 @@
  */
 package org.microbean.kubernetes.controller;
 
-import java.util.Collection;
-import java.util.List;
-import java.util.Set;
-
-import java.util.function.BiConsumer;
-
-import org.microbean.development.annotation.Experimental;
-
-@Experimental
-// See https://github.com/kubernetes/client-go/blob/master/tools/cache/fifo.go
-public interface QueueStore<T, L> extends Store<T, L> {
-
-  public L popAndProcessUsing(final BiConsumer<QueueStore<T, L>, L> processor) throws InterruptedException;
-
-  public void addIfNotPresent(final L object);
+public interface Syncable {
 
   public boolean getHasSynced();
 
-  public void close();
-
-  public boolean isClosed();
+  public String getLastSyncResourceVersion();
   
 }

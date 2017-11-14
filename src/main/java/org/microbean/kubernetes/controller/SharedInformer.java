@@ -22,10 +22,13 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.api.model.KubernetesResourceList;
+
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 
-public class SharedInformer<T, L> implements Runnable {
+public class SharedInformer<T extends HasMetadata, L extends KubernetesResourceList, D> implements Runnable, Syncable {
 
   private final Store<T, L> store;
 
@@ -42,6 +45,10 @@ public class SharedInformer<T, L> implements Runnable {
 
   public final Store<T, L> getStore() {
     return this.store;
+  }
+
+  public final Controller<T, L, D> getController() {
+    return null; // TODO: implement
   }
 
   public void run() {

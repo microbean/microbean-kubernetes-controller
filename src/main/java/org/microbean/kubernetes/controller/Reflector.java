@@ -89,7 +89,7 @@ public class Reflector<T extends HasMetadata, L extends KubernetesResourceList, 
     this.lastSyncResourceVersion = resourceVersion;
   }
 
-  private boolean shouldResync() {
+  protected boolean shouldResync() {
     return true;
   }
 
