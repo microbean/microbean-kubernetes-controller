@@ -69,7 +69,7 @@ public class Reflector<T extends HasMetadata, L extends KubernetesResourceList, 
     @SuppressWarnings("unchecked")
     final MixedOperation<T, L, ?, ?> temp = (MixedOperation<T, L, ?, ?>)operation.withResourceVersion("0");
     this.operation = temp;
-    this.resyncExecutorService = Objects.requireNonNull(resyncExecutorService);
+    this.resyncExecutorService = resyncExecutorService;
     this.resyncInterval = Objects.requireNonNull(resyncInterval);
   }
 
@@ -90,7 +90,7 @@ public class Reflector<T extends HasMetadata, L extends KubernetesResourceList, 
   }
 
   protected boolean shouldResync() {
-    return true;
+    return this.resyncExecutorService != null;
   }
 
   // Models the ListAndWatch func in the Go code.
@@ -116,7 +116,7 @@ public class Reflector<T extends HasMetadata, L extends KubernetesResourceList, 
     assert resyncDuration != null;
     final long seconds = resyncDuration.get(ChronoUnit.SECONDS);
 
-    if (seconds > 0L) {
+    if (seconds > 0L && this.resyncExecutorService != null) {
       final ScheduledFuture<?> job = this.resyncExecutorService.scheduleWithFixedDelay(() -> {
           // TODO: what if any of this errors out?
           if (shouldResync()) {

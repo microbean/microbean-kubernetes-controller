@@ -31,7 +31,7 @@ import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 
-public abstract class Controller<T extends HasMetadata, L extends KubernetesResourceList, D> implements Runnable, Syncable {
+public class Controller<T extends HasMetadata, L extends KubernetesResourceList, D> implements Runnable, Syncable {
 
   private final QueueStore<T, D> queueStore;
   
@@ -54,7 +54,6 @@ public abstract class Controller<T extends HasMetadata, L extends KubernetesReso
                        final boolean retryOnError) {
     super();
     this.queueStore = Objects.requireNonNull(queueStore);
-    this.processor = Objects.requireNonNull(processor);
     this.reflector = new Reflector<T, L, D>(queueStore, operation, resyncExecutorService, resyncInterval) {
         @Override
         protected final boolean shouldResync() {
@@ -62,6 +61,7 @@ public abstract class Controller<T extends HasMetadata, L extends KubernetesReso
         }
       };
     this.reflectorExecutorService = Objects.requireNonNull(reflectorExecutorService);
+    this.processor = Objects.requireNonNull(processor);
     this.retryOnError = retryOnError;
   }
 
@@ -70,23 +70,29 @@ public abstract class Controller<T extends HasMetadata, L extends KubernetesReso
     return this.queueStore.getHasSynced();
   }
 
+  @Override
+  public final String getLastSyncResourceVersion() {
+    return this.reflector.getLastSyncResourceVersion();
+  }  
+
+  protected boolean shouldResync() {
+    return true;
+  }
+
   public final boolean getRetryOnError() {
     return this.retryOnError;
   }
 
-  @Override
-  public final String getLastSyncResourceVersion() {
-    return this.reflector.getLastSyncResourceVersion();
+  public final void close() {
+    this.stop = true;    
   }
-
+  
   @Override
   public final void run() {
-    final Future<?> reflectorJob = this.reflectorExecutorService.submit(this.reflector);
-    this.processLoop(reflectorJob);
-  }
-
-  protected boolean shouldResync() {
-    return true;
+    if (!this.stop) {
+      final Future<?> reflectorJob = this.reflectorExecutorService.submit(this.reflector);
+      this.processLoop(reflectorJob);
+    }
   }
 
   // Modeled after the processLoop function in controller.go.  That
@@ -100,6 +106,7 @@ public abstract class Controller<T extends HasMetadata, L extends KubernetesReso
         if (reflectorJob != null) {
           reflectorJob.cancel(true);
         }
+        this.reflector.close();
         Thread.currentThread().interrupt();       
         this.stop = true;
       } catch (final RuntimeException runtimeException) {
