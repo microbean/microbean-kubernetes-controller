@@ -17,13 +17,41 @@
 package org.microbean.kubernetes.controller;
 
 import java.util.EventObject;
+import java.util.Objects;
 
 public class ResourceEvent extends EventObject {
 
   private static final long serialVersionUID = 1L;
+
+  private final Type type;
   
-  public ResourceEvent(final Object source) {
+  private final Object oldObject;
+
+  private final Object newObject;
+  
+  public ResourceEvent(final Object source, final Type type, final Object oldObject, final Object newObject) {
     super(source);
+    this.type = Objects.requireNonNull(type);
+    this.oldObject = oldObject;
+    this.newObject = newObject;
+  }
+
+  public final Type getType() {
+    return this.type;
+  }
+  
+  public final Object getOldObject() {
+    return this.oldObject;
+  }
+
+  public final Object getNewObject() {
+    return this.newObject;
+  }
+
+  public enum Type {
+    ADDITION,
+    UPDATE,
+    DELETION
   }
   
 }

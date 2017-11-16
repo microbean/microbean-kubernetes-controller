@@ -27,10 +27,12 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Queue;
 
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.SynchronousQueue;
 
 import java.util.concurrent.locks.Lock;
@@ -50,7 +52,11 @@ import io.fabric8.kubernetes.client.Watcher;
 
 public class SharedInformer<T extends HasMetadata, L extends KubernetesResourceList, D> implements Runnable, Syncable {
 
-  private final Store<T, L> store;
+  private final ExecutorService executorService;
+
+  private final SharedProcessor<T> processor;
+  
+  private final Indexer<T, L> store;
 
   private boolean hasSynced;
 
@@ -58,16 +64,19 @@ public class SharedInformer<T extends HasMetadata, L extends KubernetesResourceL
 
   private List<ResourceEventListener> resourceEventListeners;
   
-  public SharedInformer(final MixedOperation<T, L, ?, ?> operation,
-                        final Store<T, L> store,
+  public SharedInformer(final ExecutorService executorService,
+                        final MixedOperation<T, L, ?, ?> operation,
+                        final Indexer<T, L> store,
                         final Supplier<? extends List<? extends T>> listFunction,
                         final Function<Watcher<T>, Watch> watchFunction) {
     super();
+    this.executorService = Objects.requireNonNull(executorService);
+    this.processor = new SharedProcessor<T>(executorService);
     this.store = Objects.requireNonNull(store);
     this.resourceEventListeners = new ArrayList<>();
   }
 
-  public final Store<T, L> getStore() {
+  public final Indexer<T, L> getStore() {
     return this.store;
   }
 
@@ -106,6 +115,139 @@ public class SharedInformer<T extends HasMetadata, L extends KubernetesResourceL
   public ResourceEventListener[] getResourceEventListeners() {
     return this.resourceEventListeners.toArray(new ResourceEventListener[this.resourceEventListeners.size()]);
   }
+
+
+  /*
+   * Inner and nested classes.
+   */
+
+
+  // Blind port for now of sharedProcessor struct in
+  // shared_informer.go.  We'll clean this up, rename it, and make it
+  // more idiomatic in another pass.
+  private static final class SharedProcessor<T> implements Runnable {
+
+    private final ExecutorService executorService;
+    
+    private Collection<ProcessorListener<T>> listeners;
+
+    private Collection<ProcessorListener<T>> syncingListeners;
+
+    private final ReentrantReadWriteLock listenersLock;
+    
+    private final Lock listenersReadLock;
+
+    private final Lock listenersWriteLock;
+    
+    private SharedProcessor(final ExecutorService executorService) {
+      super();
+      this.executorService = Objects.requireNonNull(executorService);
+      this.listenersLock = new ReentrantReadWriteLock();
+      this.listenersReadLock = listenersLock.readLock();
+      this.listenersWriteLock = listenersLock.writeLock();
+    }
+
+    private final void addListener(final ProcessorListener<T> listener) {
+      if (listener != null) {
+        this.listenersWriteLock.lock();
+        try {
+          this.addListenerLocked(listener);
+        } finally {
+          this.listenersWriteLock.unlock();
+        }
+      }
+    }
+
+    // Something is very wrong in the Go code.  This method and run()
+    // both submit jobs.  But run() goes through the existing
+    // listeners and potentially submits them again!  Currently we
+    // allow this behavior since right now we're just blindly porting.
+    //
+    // There also seem to be some usage restrictions (undocumented)
+    // around this method's analog in the Go code.
+    private final void addAndStartListener(final ProcessorListener<T> listener) {
+      if (listener != null) {
+        this.listenersWriteLock.lock();
+        try {
+          this.addListenerLocked(listener);
+          // TODO: Note that these won't be cancelled by the
+          // invokeAll() statement in run() below.  This bug? is
+          // present in the Go code as well.
+          this.executorService.execute(listener::run);
+          this.executorService.execute(listener::pop);
+        } finally {
+          this.listenersWriteLock.unlock();
+        }
+      }
+    }
+
+    private final void addListenerLocked(final ProcessorListener<T> listener) {
+      assert this.listenersLock.isWriteLockedByCurrentThread();
+      if (listener != null) {
+        if (this.listeners == null) {
+          this.listeners = new ArrayList<>();
+        }
+        this.listeners.add(listener);
+        if (this.syncingListeners == null) {
+          this.syncingListeners = new ArrayList<>();
+        }
+        this.syncingListeners.add(listener);
+      }
+    }
+
+    private final void distribute(final Notification<T> object, final boolean sync) throws InterruptedException {
+      if (object != null) {
+        this.listenersReadLock.lock();
+        try {
+          final Collection<ProcessorListener<T>> listeners;
+          if (sync) {
+            listeners = this.syncingListeners;
+          } else {
+            listeners = this.listeners;
+          }
+          if (listeners != null && !listeners.isEmpty()) {
+            for (final ProcessorListener<T> listener : listeners) {
+              if (listener != null) {
+                listener.add(object); // blocks
+              }
+            }
+          }
+        } finally {
+          this.listenersReadLock.unlock();
+        }
+      }
+    }
+
+    @Override
+    public final void run() {
+      final Collection<Callable<Void>> jobs = new ArrayList<>();
+      this.listenersReadLock.lock();
+      try {
+        // TODO: Note that this won't get the run/pop jobs created by
+        // addAndStartListener().  This bug? is present in the Go code
+        // as well.
+        for (final ProcessorListener<T> listener : listeners) {
+          if (listener != null) {
+            jobs.add(() -> { listener.run(); return null; });
+            jobs.add(() -> { listener.pop(); return null; });
+          }
+        }
+      } finally {
+        this.listenersReadLock.unlock();
+      }
+      List<Future<Void>> completedJobs = null;
+      try {
+        completedJobs = this.executorService.invokeAll(jobs); // blocks
+      } catch (final InterruptedException interruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      // TODO: spin through completed jobs if for some crazy reason
+      // there are any (both should block forever) and harvest any
+      // errors, then log them, I guess
+    }
+    
+  }  
+  
 
   private static class Notification<T> {
 
@@ -175,7 +317,7 @@ public class SharedInformer<T extends HasMetadata, L extends KubernetesResourceL
     private final Lock resyncReadLock;
 
     private final Lock resyncWriteLock;
-    
+
     private ProcessorListener(final ResourceEventListener listener,
                               final SynchronousQueue<Notification<T>> incomingNotifications,
                               final SynchronousQueue<Notification<T>> outgoingNotifications,
@@ -198,7 +340,7 @@ public class SharedInformer<T extends HasMetadata, L extends KubernetesResourceL
 
     private final void add(final Notification<T> notification) throws InterruptedException {
       if (notification != null) {
-        this.incomingNotifications.put(notification);
+        this.incomingNotifications.put(notification); // blocks
       }
     }
 
@@ -256,11 +398,11 @@ public class SharedInformer<T extends HasMetadata, L extends KubernetesResourceL
         }
         assert notification != null;
         if (notification instanceof Addition) {
-          this.listener.resourceAdded(null); // TODO FIX
+          this.listener.resourceAdded(new ResourceEvent(this, ResourceEvent.Type.ADDITION, null, notification.getObject()));
         } else if (notification instanceof Update) {
-          this.listener.resourceUpdated(null); // TODO FIX
+          this.listener.resourceUpdated(new ResourceEvent(this, ResourceEvent.Type.UPDATE, ((Update)notification).getOldObject(), notification.getObject()));
         } else if (notification instanceof Deletion) {
-          this.listener.resourceDeleted(null); // TODO FIX
+          this.listener.resourceDeleted(new ResourceEvent(this, ResourceEvent.Type.DELETION, notification.getObject(), null));
         } else {
           throw new IllegalStateException();
         }
