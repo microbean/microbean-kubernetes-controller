@@ -16,6 +16,8 @@
  */
 package org.microbean.kubernetes.controller;
 
+import java.io.Closeable;
+
 import java.time.Duration;
 
 import java.util.Collection;
@@ -26,16 +28,25 @@ import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
+
+import io.fabric8.kubernetes.api.model.ConfigMap;
+import io.fabric8.kubernetes.api.model.ConfigMapList;
+import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
 import io.fabric8.kubernetes.api.model.Pod;
-import io.fabric8.kubernetes.api.model.PodList;
 
 import io.fabric8.kubernetes.client.DefaultKubernetesClient;
+
+import io.fabric8.kubernetes.client.dsl.Listable;
+import io.fabric8.kubernetes.client.dsl.VersionWatchable;
 
 import org.junit.Test;
 
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeFalse;
+
+import io.fabric8.kubernetes.client.Watcher;
 
 @Deprecated
 public class TestReflectorBasics {
@@ -50,13 +61,13 @@ public class TestReflectorBasics {
     final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(2);
     assertNotNull(executorService);
     final DefaultKubernetesClient client = new DefaultKubernetesClient();
-    final Reflector<Pod, PodList, List<Delta<Pod>>> reflector =
-      new Reflector<>(new StupidStore<Pod, List<Delta<Pod>>>(),
-                      client.pods(),
-                      executorService,
-                      Duration.ofSeconds(10));
+    final Reflector<ConfigMap> reflector =
+      new Reflector<ConfigMap>(client.configMaps(),
+                               executorService,
+                               Duration.ofSeconds(10));
     System.out.println("*** running reflector");
-    reflector.run();
+    reflector.start();
+    System.out.println("*** sleeping");
     Thread.sleep(10L * 60L * 1000L);
     System.out.println("*** closing reflector");
     reflector.close();
@@ -70,69 +81,4 @@ public class TestReflectorBasics {
     new TestReflectorBasics().testBasics();
   }
 
-  private static final class StupidStore<T, L> implements Store<T, L> {
-
-    @Override
-    public void add(final T object) {
-      System.out.println("*** add: " + object);
-    }
-
-    @Override
-    public L get(final T object) {
-      System.out.println("*** get");
-      return null;
-    }
-
-    @Override
-    public L getByKey(final String key) {
-      System.out.println("*** getByKey");
-      return null;
-    }
-    
-    @Override
-    public void update(final T object) {
-      System.out.println("*** update: " + object);
-    }
-    
-    @Override
-    public void delete(final T object) {
-      System.out.println("*** delete: " + object);
-    }
-    
-    @Override
-    public Collection<T> list() {
-      System.out.println("*** list");
-      return Collections.emptySet();
-    }
-    
-    @Override
-    public Set<String> listKeys() {
-      System.out.println("*** listKeys");
-      return Collections.emptySet();
-    }
-    
-    @Override
-    public boolean contains(final T object) {
-      System.out.println("*** contains: " + object);
-      return false;
-    }
-    
-    @Override
-    public boolean containsKey(final String key) {
-      System.out.println("*** containsKey: " + key);
-      return false;
-    }
-    
-    @Override
-    public void replace(final Collection<? extends T> objects, final String resourceVersion) {
-      System.out.println("*** replace: objects: " + objects + "; resourceVersion: " + resourceVersion);
-    }
-
-    @Override
-    public void resync() {
-      System.out.println("*** resync");
-    }
-    
-  }
-  
 }

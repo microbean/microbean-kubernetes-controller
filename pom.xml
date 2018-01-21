@@ -4,7 +4,7 @@
 
   <groupId>org.microbean</groupId>
   <artifactId>microbean-kubernetes-controller</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.0.1-SNAPSHOT</version>
 
   <parent>
     <groupId>org.microbean</groupId>
@@ -35,14 +35,14 @@
       <dependency>
         <groupId>io.fabric8</groupId>
         <artifactId>kubernetes-client</artifactId>
-        <version>3.0.0</version>
+        <version>3.1.8</version>
         <type>jar</type>
       </dependency>
 
       <dependency>
         <groupId>org.microbean</groupId>
         <artifactId>microbean-development-annotations</artifactId>
-        <version>0.1.2</version>
+        <version>0.1.3-SNAPSHOT</version>
         <type>jar</type>
       </dependency>
       
@@ -144,8 +144,8 @@
           <configuration>
             <offlineLinks>
               <offlineLink>
-                <url>http://static.javadoc.io/io.fabric8/kubernetes-client/3.0.0</url>
-                <location>${project.basedir}/src/main/javadoc/io.fabric8/kubernetes-client/3.0.0</location>
+                <url>http://static.javadoc.io/io.fabric8/kubernetes-client/3.1.8</url>
+                <location>${project.basedir}/src/main/javadoc/io.fabric8/kubernetes-client/3.1.8</location>
               </offlineLink>
               <offlineLink>
                 <url>http://static.javadoc.io/io.fabric8/kubernetes-model/1.1.4</url>
