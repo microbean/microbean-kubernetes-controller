@@ -69,8 +69,6 @@ public class Reflector<T extends HasMetadata> implements Closeable {
 
   private final Lock writeLock;
 
-  private final Lock closeLock;
-
   private final Condition eventQueuesIsNotEmpty;
   
   private final LinkedHashMap<Object, Collection<Event<? extends T>>> eventQueues;
@@ -87,13 +85,13 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   
   private final Duration resyncInterval;
 
-  private final Map<?, ? extends T> knownObjects;
+  private final Iterable<? extends T> knownObjects;
 
   private boolean populated;
 
   private int initialPopulationCount;
 
-  private Closeable watch;
+  private volatile Closeable watch;
 
 
   /*
@@ -104,9 +102,9 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
                                                                                                                               final Duration resyncInterval) {
-    this(operation, Executors.newScheduledThreadPool(1), resyncInterval, null);
+    this(operation, resyncInterval == null ? null : Executors.newScheduledThreadPool(1), resyncInterval, null);
   }
-  
+
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
                                                                                                                               final ScheduledExecutorService resyncExecutorService,
@@ -118,26 +116,23 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
                                                                                                                               final ScheduledExecutorService resyncExecutorService,
                                                                                                                               final Duration resyncInterval,
-                                                                                                                              final Map<?, ? extends T> knownObjects) {
+                                                                                                                              final Iterable<? extends T> knownObjects) {
     super();
     this.lock = new ReentrantReadWriteLock();
     this.readLock = this.lock.readLock();
     this.writeLock = this.lock.writeLock();
     this.eventQueuesIsNotEmpty = this.writeLock.newCondition();
-    this.closeLock = new ReentrantLock();
     this.eventQueues = new LinkedHashMap<>();
     this.resources = new HashMap<>();
-    // Or maybe: operation.withField("metadata.resourceVersion", "0")?    
+    // TODO: research: maybe: operation.withField("metadata.resourceVersion", "0")?    
     this.operation = operation.withResourceVersion("0");
     this.resyncExecutorService = resyncExecutorService;
-    this.resyncInterval = Objects.requireNonNull(resyncInterval);
-    if (knownObjects == null) {
-      this.knownObjects = null;
-    } else if (knownObjects.isEmpty()) {
-      this.knownObjects = Collections.emptyMap();
-    } else {
-      this.knownObjects = Collections.unmodifiableMap(new HashMap<>(knownObjects));
-    }
+    this.resyncInterval = resyncInterval;
+    this.knownObjects = knownObjects;
+  }
+
+  private final Iterable<? extends T> getKnownObjects() {
+    return this.knownObjects;
   }
 
   protected Collection<Event<? extends T>> createEventQueue(final Object key) {
@@ -208,7 +203,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     }
   }
 
-  private Collection<Event<? extends T>> deduplicateEvents(final Collection<Event<? extends T>> events) {
+  private final Collection<Event<? extends T>> deduplicateEvents(final Collection<Event<? extends T>> events) {
     assert this.lock.isWriteLockedByCurrentThread();
     final Collection<Event<? extends T>> returnValue;
     final int size = events == null ? 0 : events.size();
@@ -382,58 +377,79 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   // websocket code underlying the fabric8 Kubernetes client watch
   // behavior is non-blocking, so the setting up and running of the
   // watch does not, itself, block.
-  private final void startReflecting() {
-    @SuppressWarnings("unchecked")
-      final KubernetesResourceList<? extends T> list = ((Listable<? extends KubernetesResourceList<? extends T>>)this.operation).list();
-    assert list != null;
-    
-    final ListMeta metadata = list.getMetadata();
-    assert metadata != null;
-    
-    final String resourceVersion = metadata.getResourceVersion();
-    assert resourceVersion != null;
-    
-    final Collection<? extends T> items = list.getItems();
-    assert items != null;
-    
-    this.replace(new ArrayList<T>(items), resourceVersion);
-    
-    this.setLastSyncResourceVersion(resourceVersion);
-    
-    final Duration resyncDuration = this.getResyncInterval();
-    assert resyncDuration != null;
-    final long seconds = resyncDuration.get(ChronoUnit.SECONDS);
-    
-    if (seconds > 0L && this.resyncExecutorService != null) {
-      final ScheduledFuture<?> job = this.resyncExecutorService.scheduleWithFixedDelay(() -> {
-          // TODO: what if any of this errors out?
-          this.writeLock.lock();
-          try {
-            if (this.shouldResync()) {
-              this.resync();
-            }
-          } finally {
-            this.writeLock.unlock();
+  private synchronized final void startReflecting() {
+    if (this.watch == null) {
+      final Thread reflectorThread = new Thread(() -> {
+          
+          @SuppressWarnings("unchecked")
+          final KubernetesResourceList<? extends T> list = ((Listable<? extends KubernetesResourceList<? extends T>>)Reflector.this.operation).list();
+          assert list != null;
+          
+          final ListMeta metadata = list.getMetadata();
+          assert metadata != null;
+          
+          final String resourceVersion = metadata.getResourceVersion();
+          assert resourceVersion != null;
+          
+          final Collection<? extends T> items = list.getItems();
+          if (items == null || items.isEmpty()) {
+            Reflector.this.replace(Collections.emptySet(), resourceVersion);
+          } else {
+            Reflector.this.replace(Collections.unmodifiableCollection(new ArrayList<T>(items)), resourceVersion);
           }
-        }, 0L, seconds, TimeUnit.SECONDS);
-      assert job != null;
+          
+          Reflector.this.setLastSyncResourceVersion(resourceVersion);
+          
+          if (Reflector.this.resyncExecutorService != null) {
+            
+            final Duration resyncDuration = Reflector.this.getResyncInterval();
+            final long seconds;
+            if (resyncDuration == null) {
+              seconds = 0L;
+            } else {
+              seconds = resyncDuration.get(ChronoUnit.SECONDS);
+            }
+            
+            if (seconds > 0L) {
+              final ScheduledFuture<?> job = Reflector.this.resyncExecutorService.scheduleWithFixedDelay(() -> {
+                  Reflector.this.writeLock.lock();
+                  try {
+                    if (Reflector.this.shouldResync()) {
+                      Reflector.this.resync();
+                    }
+                  } catch (final RuntimeException runtimeException) {
+                    // TODO: log or...?
+                    throw runtimeException;
+                  } finally {
+                    Reflector.this.writeLock.unlock();
+                  }
+                }, 0L, seconds, TimeUnit.SECONDS);
+              assert job != null;
+              // TODO: we don't need to do anything with this job, right?
+            }
+            
+          }
+          
+          @SuppressWarnings("unchecked")
+          final Closeable temp = ((VersionWatchable<? extends Closeable, Watcher<T>>)Reflector.this.operation).withResourceVersion(resourceVersion).watch(new WatchHandler());
+          assert temp != null;
+          Reflector.this.watch = temp;
+        });
+      reflectorThread.setDaemon(true);
+      reflectorThread.start();
     }
-    
-    @SuppressWarnings("unchecked")
-      final Closeable temp = ((VersionWatchable<? extends Closeable, Watcher<T>>)this.operation).withResourceVersion(resourceVersion).watch(new WatchHandler());
-    assert temp != null;
-    this.watch = temp;
   }
 
-  private final void startDistributing() {
-    Thread thread = this.distributorThread;
-    if (thread == null) {
-      thread = new Thread(() -> {
+  private synchronized final void startDistributing() {
+    if (this.distributorThread == null) {
+      this.distributorThread = new Thread(() -> {
           PROCESSING_LOOP:
           while (!Thread.interrupted()) {
             
             this.writeLock.lock();          
             try {
+
+              // Block while there are no event queues to work on.
               while (this.eventQueues.isEmpty()) {
                 try {
                   this.eventQueuesIsNotEmpty.await();
@@ -443,10 +459,17 @@ public class Reflector<T extends HasMetadata> implements Closeable {
                 }
               }
               assert !this.eventQueues.isEmpty();
+
+              // Get and remove the first event queue.  The queue
+              // might hold, for example, events that have happened to
+              // a hypothetical pod default/sq3r9.
               final Collection<? extends Event<? extends T>> eventQueue = this.pop();
               if (this.initialPopulationCount > 0) {
                 this.initialPopulationCount--;
               }
+
+              // If indeed we got an event queue, process all of its
+              // contained events.
               if (eventQueue != null && !eventQueue.isEmpty()) {
                 try {
                   this.processEventQueue(eventQueue);
@@ -456,14 +479,14 @@ public class Reflector<T extends HasMetadata> implements Closeable {
                   throw oops;
                 }
               }
+              
             } finally {
               this.writeLock.unlock();
             }
           }
         });
-      thread.setDaemon(true);
-      this.distributorThread = thread;
-      thread.start();
+      this.distributorThread.setDaemon(true);
+      this.distributorThread.start();
     }
   }
 
@@ -504,19 +527,20 @@ public class Reflector<T extends HasMetadata> implements Closeable {
 
   private final void resync() {
     assert this.lock.isWriteLockedByCurrentThread();
-    if (this.knownObjects != null && !this.knownObjects.isEmpty()) {
-      final Set<? extends Entry<?, ? extends T>> entrySet = this.knownObjects.entrySet();
-      if (entrySet != null && !entrySet.isEmpty()) {
-        for (final Entry<?, ? extends T> entry : entrySet) {
-          assert entry != null;
-          final Object knownKey = entry.getKey();
-          assert knownKey != null;
-          final T knownObject = entry.getValue();
-          assert knownObject != null;
-          final Object key = this.getKey(knownObject);
-          final Collection<Event<? extends T>> eventQueue = this.eventQueues.get(key);
-          if (eventQueue == null || eventQueue.isEmpty()) {
-            this.enqueue(new Event<>(this, Event.Type.SYNCHRONIZATION, null, null, knownObject));
+    final Iterable<? extends T> knownObjects = this.getKnownObjects();
+    if (knownObjects != null) {
+      // TODO: I don't like this.  I need to provide *some* help here:
+      // the user who constructed this supplied an Iterable and may be
+      // writing to it while I'm trying to iterate over it.  But I
+      // don't like synchronizing on something I don't control.
+      synchronized (knownObjects) {
+        for (final T knownObject : knownObjects) {
+          if (knownObject != null) {
+            final Object key = this.getKey(knownObject);
+            final Collection<Event<? extends T>> eventQueue = this.eventQueues.get(key);
+            if (eventQueue == null || eventQueue.isEmpty()) {
+              this.enqueue(new Event<>(this, Event.Type.SYNCHRONIZATION, null, null, knownObject));
+            }
           }
         }
       }
@@ -524,35 +548,38 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   }
   
   private final void replace(final Collection<? extends T> resources, final Object resourceVersion) {
+    Objects.requireNonNull(resources);
+    
     this.writeLock.lock();
     try {
 
-      System.out.println("*** replacing: " + resources + "; " + resourceVersion);
-      
       final Set<Object> keys = new HashSet<>();
       for (final T resource : resources) {
         final Object key = this.getKey(resource);
         if (key == null) {
-          throw new IllegalArgumentException("Unable to get key for " + resource);
+          throw new IllegalStateException("getKey(resource) == null: " + resource);
         }
         keys.add(key);
         this.enqueue(new Event<>(this, Event.Type.SYNCHRONIZATION, null, null, resource));
       }
-      
-      if (this.knownObjects == null) {
+
+      final Iterable<? extends T> knownObjects = this.getKnownObjects();
+      if (knownObjects == null) {
         final Collection<? extends Entry<?, Collection<Event<? extends T>>>> entrySet = this.eventQueues.entrySet();
         if (entrySet != null && !entrySet.isEmpty()) {
           for (final Entry<?, ? extends Collection<Event<? extends T>>> entry : entrySet) {
             assert entry != null;
             final Object key = entry.getKey();
             if (!keys.contains(key)) {
+              // We have an event queue indexed under a key that no
+              // longer exists in Kubernetes.
               final Collection<Event<? extends T>> eventQueue = entry.getValue();
               assert eventQueue != null;
               final Event<? extends T> newestEvent = get(eventQueue, eventQueue.size() - 1);
               assert newestEvent != null;
-              final T deletedResource = newestEvent.getResource();
-              assert deletedResource != null;
-              this.enqueue(new Event<>(this, Event.Type.DELETION, key, deletedResource, deletedResource));
+              final T resourceToBeDeleted = newestEvent.getResource();
+              assert resourceToBeDeleted != null;
+              this.enqueue(new Event<>(this, Event.Type.DELETION, key, resourceToBeDeleted, resourceToBeDeleted));
               if (!this.populated) {
                 this.populated = true;
                 this.initialPopulationCount = eventQueue.size();
@@ -562,16 +589,18 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         }
       } else {
         int queuedDeletions = 0;
-        final Set<? extends Entry<?, ? extends T>> entrySet = this.knownObjects.entrySet();
-        if (entrySet != null && !entrySet.isEmpty()) {
-          for (final Entry<?, ? extends T> entry : entrySet) {
-            assert entry != null;
-            final Object knownKey = entry.getKey();
-            assert knownKey != null;
-            if (!keys.contains(knownKey)) {
-              final T deletedResource = entry.getValue();
-              queuedDeletions++;
-              this.enqueue(new Event<>(this, Event.Type.DELETION, knownKey, deletedResource, deletedResource));
+        // TODO: I don't like this.  I need to provide *some* help here:
+        // the user who constructed this supplied an Iterable and may be
+        // writing to it while I'm trying to iterate over it.  But I
+        // don't like synchronizing on something I don't control.
+        synchronized (knownObjects) {
+          for (final T knownObject : knownObjects) {
+            if (knownObject != null) {
+              final Object knownKey = this.getKey(knownObject);
+              if (knownKey != null && !keys.contains(knownKey)) {
+                queuedDeletions++;
+                this.enqueue(new Event<>(this, Event.Type.DELETION, knownKey, knownObject, knownObject));
+              }
             }
           }
         }
@@ -593,32 +622,24 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   }
 
   @Override
-  public void close() throws IOException {
-    final Closeable watch = this.watch;
-    if (watch != null) {
-      this.closeLock.lock();
+  public synchronized final void close() throws IOException {
+    if (this.watch != null) {
       try {
-        watch.close();
-
-        // TODO: All this may not be necessary if we interrupt the
-        // distributorThread.
-        this.writeLock.lock();
-        try {
-          this.eventQueuesIsNotEmpty.signal();
-        } finally {
-          this.writeLock.unlock();
-        }
-        
-        final Thread distributorThread = this.distributorThread;
-        if (distributorThread != null) {
-          distributorThread.interrupt();
-        }
+        this.watch.close();
       } finally {
-        this.closeLock.unlock();
+        if (this.distributorThread != null) {
+          this.distributorThread.interrupt();
+        }
+        this.onClose();
       }
     }
+
   }
 
+  protected void onClose() {
+
+  }
+  
 
   /*
    * Inner and nested classes.
