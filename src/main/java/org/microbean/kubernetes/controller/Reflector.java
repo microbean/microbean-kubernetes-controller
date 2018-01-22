@@ -85,7 +85,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   
   private final Duration resyncInterval;
 
-  private final Iterable<? extends T> knownObjects;
+  private final Map<?, ? extends T> knownObjects;
 
   private boolean populated;
 
@@ -111,19 +111,43 @@ public class Reflector<T extends HasMetadata> implements Closeable {
                                                                                                                               final Duration resyncInterval) {
     this(operation, resyncExecutorService, resyncInterval, null);
   }
-  
+
+  /**
+   * Creates a new {@link Reflector}.
+   *
+   * @param operation a {@link Listable} and a {@link
+   * VersionWatchable} that serves as the source of events; must not
+   * be {@code null}
+   *
+   * @param resyncExecutorService a {@link ScheduledExecutorService}
+   * that will be used to periodically resynchronize this {@link
+   * Reflector} with the event source; may be {@code null} in which
+   * case no resynchronization will occur
+   *
+   * @param resyncInterval a {@link Duration} indicating the interval
+   * at which resynchronization will occur; may be {@code null} in
+   * which case no resynchronization will occur
+   *
+   * @param knownObjects a {@link Map} that can periodically inform
+   * this {@link Reflector} of Kubernetes resources that are already
+   * known in some way; may be {@code null}; <strong>will be {@code
+   * synchronized} on during access</strong>
+   */
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
                                                                                                                               final ScheduledExecutorService resyncExecutorService,
                                                                                                                               final Duration resyncInterval,
-                                                                                                                              final Iterable<? extends T> knownObjects) {
+                                                                                                                              final Map<?, ? extends T> knownObjects) {
     super();
+    Objects.requireNonNull(operation);
+
     this.lock = new ReentrantReadWriteLock();
     this.readLock = this.lock.readLock();
     this.writeLock = this.lock.writeLock();
     this.eventQueuesIsNotEmpty = this.writeLock.newCondition();
     this.eventQueues = new LinkedHashMap<>();
     this.resources = new HashMap<>();
+    
     // TODO: research: maybe: operation.withField("metadata.resourceVersion", "0")?    
     this.operation = operation.withResourceVersion("0");
     this.resyncExecutorService = resyncExecutorService;
@@ -131,7 +155,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     this.knownObjects = knownObjects;
   }
 
-  private final Iterable<? extends T> getKnownObjects() {
+  private final Map<?, ? extends T> getKnownObjects() {
     return this.knownObjects;
   }
 
@@ -142,6 +166,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
 
   private final void enqueue(final Event<T> event) {
     if (event != null) {
+      
       final Object key = event.getKey();
       if (key == null) {
         throw new IllegalStateException("event.getKey() == null: " + event);
@@ -150,49 +175,65 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       this.writeLock.lock();
       try {
         this.populated = true;
+
         final Event.Type eventType = event.getType();
         assert eventType != null;
+
         if (!Event.Type.SYNCHRONIZATION.equals(eventType) || !willObjectBeDeleted(key)) {
           
           Collection<Event<? extends T>> eventQueue = this.eventQueues.get(key);
           final boolean eventQueueExisted = eventQueue != null;
-          if (!eventQueueExisted) {
-            eventQueue = this.createEventQueue(key);
-            if (eventQueue == null) {
-              throw new IllegalStateException("createEventQueue(key) == null: " + key);
-            }
-          }
-          assert eventQueue != null;
 
-          final T resource = event.getResource();
-          T oldResource = null;
-
+          final boolean enqueue;
+          final T oldResource;
           if (eventType.equals(Event.Type.DELETION)) {
+            if (eventQueueExisted) {
+              enqueue = true;
+            } else {
+              boolean known = false;
+              Map<?, ? extends T> knownObjects = this.getKnownObjects();
+              if (knownObjects != null) {
+                synchronized (knownObjects) {
+                  known = knownObjects.containsKey(key);
+                }
+              }
+              enqueue = known;
+            }
             oldResource = this.resources.remove(key);
           } else {
-            oldResource = this.resources.put(key, resource);
+            enqueue = true;
+            oldResource = this.resources.put(key, event.getResource());
             event.setOldResource(oldResource);
           }
-          
-          try {
-            this.enqueue(eventQueue, event);
-          } catch (final RuntimeException runtimeException) {
-            // If enqueuing failed, restore our "old state" map to
-            // what it was.
-            this.resources.put(key, oldResource);
-            throw runtimeException;
-          }
 
-          eventQueue = this.deduplicateEvents(eventQueue);
-          eventQueue = this.compress(eventQueue);
-          
-          if (eventQueue != null && !eventQueue.isEmpty()) {
-            this.eventQueues.put(key, eventQueue);
-            this.eventQueuesIsNotEmpty.signal();
-          } else if (eventQueueExisted) {
-            // There WAS an event queue, but now it's gone as a result
-            // of deduplication or compression.
-            this.eventQueues.remove(key);
+          if (enqueue) {
+            try {
+              if (!eventQueueExisted) {
+                eventQueue = this.createEventQueue(key);
+                if (eventQueue == null) {
+                  throw new IllegalStateException("createEventQueue(key) == null: " + key);
+                }
+              }
+              assert eventQueue != null;
+              this.enqueue(eventQueue, event);
+            } catch (final RuntimeException runtimeException) {
+              // If enqueuing failed, restore our "old state" map to
+              // what it was.
+              this.resources.put(key, oldResource);
+              throw runtimeException;
+            }
+            
+            eventQueue = this.deduplicateEvents(eventQueue);
+            eventQueue = this.compress(eventQueue);
+            
+            if (eventQueue != null && !eventQueue.isEmpty()) {
+              this.eventQueues.put(key, eventQueue);
+              this.eventQueuesIsNotEmpty.signal();
+            } else if (eventQueueExisted) {
+              // There WAS an event queue, but now it's gone as a result
+              // of deduplication or compression.
+              this.eventQueues.remove(key);
+            }
           }
           
         }
@@ -527,19 +568,29 @@ public class Reflector<T extends HasMetadata> implements Closeable {
 
   private final void resync() {
     assert this.lock.isWriteLockedByCurrentThread();
-    final Iterable<? extends T> knownObjects = this.getKnownObjects();
+    final Map<?, ? extends T> knownObjects = this.getKnownObjects();
     if (knownObjects != null) {
       // TODO: I don't like this.  I need to provide *some* help here:
       // the user who constructed this supplied an Iterable and may be
       // writing to it while I'm trying to iterate over it.  But I
       // don't like synchronizing on something I don't control.
       synchronized (knownObjects) {
-        for (final T knownObject : knownObjects) {
-          if (knownObject != null) {
-            final Object key = this.getKey(knownObject);
-            final Collection<Event<? extends T>> eventQueue = this.eventQueues.get(key);
-            if (eventQueue == null || eventQueue.isEmpty()) {
-              this.enqueue(new Event<>(this, Event.Type.SYNCHRONIZATION, null, null /* oldResource; may get set later */, knownObject));
+        if (!knownObjects.isEmpty()) {
+          final Collection<? extends T> values = knownObjects.values();
+          if (values != null && !values.isEmpty()) {
+            for (final T knownObject : values) {
+              if (knownObject != null) {
+                // We follow the Go code in that we use *our* key
+                // extraction logic, rather than relying on the known
+                // key in the knownObjects map.
+                final Object key = this.getKey(knownObject);
+                if (key != null) {
+                  final Collection<Event<? extends T>> eventQueue = this.eventQueues.get(key);
+                  if (eventQueue == null || eventQueue.isEmpty()) {
+                    this.enqueue(new Event<>(this, Event.Type.SYNCHRONIZATION, null, null /* oldResource; may get set later */, knownObject));
+                  }
+                }
+              }
             }
           }
         }
@@ -563,7 +614,8 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         this.enqueue(new Event<>(this, Event.Type.SYNCHRONIZATION, null, null /* oldResource; may get set later */, resource));
       }
 
-      final Iterable<? extends T> knownObjects = this.getKnownObjects();
+      int queuedDeletions = 0;
+      final Map<?, ? extends T> knownObjects = this.getKnownObjects();
       if (knownObjects == null) {
         final Collection<? extends Entry<?, Collection<Event<? extends T>>>> entrySet = this.eventQueues.entrySet();
         if (entrySet != null && !entrySet.isEmpty()) {
@@ -579,35 +631,36 @@ public class Reflector<T extends HasMetadata> implements Closeable {
               assert newestEvent != null;
               final T resourceToBeDeleted = newestEvent.getResource();
               assert resourceToBeDeleted != null;
-              this.enqueue(new Event<>(this, Event.Type.DELETION, key, resourceToBeDeleted, resourceToBeDeleted));
-              if (!this.populated) {
-                this.populated = true;
-                this.initialPopulationCount = eventQueue.size();
-              }
+              this.enqueue(new Event<>(this, Event.Type.DELETION, key, resourceToBeDeleted, null));
             }
-          }
+          }          
         }
       } else {
-        int queuedDeletions = 0;
         // TODO: I don't like this.  I need to provide *some* help here:
-        // the user who constructed this supplied an Iterable and may be
+        // the user who constructed this supplied a Map and may be
         // writing to it while I'm trying to iterate over it.  But I
         // don't like synchronizing on something I don't control.
         synchronized (knownObjects) {
-          for (final T knownObject : knownObjects) {
-            if (knownObject != null) {
-              final Object knownKey = this.getKey(knownObject);
-              if (knownKey != null && !keys.contains(knownKey)) {
-                queuedDeletions++;
-                this.enqueue(new Event<>(this, Event.Type.DELETION, knownKey, knownObject, knownObject));
+          if (!knownObjects.isEmpty()) {
+            final Collection<? extends Entry<?, ? extends T>> entrySet = knownObjects.entrySet();
+            if (entrySet != null && !entrySet.isEmpty()) {
+              for (final Entry<?, ? extends T> entry : entrySet) {
+                if (entry != null) {
+                  final Object knownKey = entry.getKey();
+                  if (!keys.contains(knownKey)) {
+                    this.enqueue(new Event<>(this, Event.Type.DELETION, knownKey, entry.getValue(), null));
+                    queuedDeletions++;
+                  }
+                }
               }
             }
           }
         }
-        if (!this.populated) {
-          this.populated = true;
-          this.initialPopulationCount = resources.size() + queuedDeletions;
-        }
+      }
+      
+      if (!this.populated) {
+        this.populated = true;
+        this.initialPopulationCount = resources.size() + queuedDeletions;
       }
     } finally {
       this.writeLock.unlock();
@@ -667,7 +720,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         event = new Event<>(Reflector.this, Event.Type.MODIFICATION, null, null, resource);
         break;
       case DELETED:
-        event = new Event<>(Reflector.this, Event.Type.DELETION, null, resource, resource);
+        event = new Event<>(Reflector.this, Event.Type.DELETION, null, resource, null);
         break;
       case ERROR:
         event = null;
@@ -859,7 +912,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
 
     @Override
     public final String toString() {
-      return new StringBuilder(this.getType()).append(": ").append(this.getOldResource()).append(" -> ").append(this.getResource()).toString();
+      return new StringBuilder().append(this.getType()).append(": ").append(this.getOldResource()).append(" -> ").append(this.getResource()).toString();
     }
 
     public static enum Type {
