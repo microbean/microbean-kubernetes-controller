@@ -368,7 +368,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   }
 
   @NonBlocking
-  public final void start() {
+  public synchronized final void start() {
     this.startReflecting();
     this.startDistributing();
   }
@@ -539,7 +539,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
             final Object key = this.getKey(knownObject);
             final Collection<Event<? extends T>> eventQueue = this.eventQueues.get(key);
             if (eventQueue == null || eventQueue.isEmpty()) {
-              this.enqueue(new Event<>(this, Event.Type.SYNCHRONIZATION, null, null, knownObject));
+              this.enqueue(new Event<>(this, Event.Type.SYNCHRONIZATION, null, null /* oldResource; may get set later */, knownObject));
             }
           }
         }
@@ -560,7 +560,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
           throw new IllegalStateException("getKey(resource) == null: " + resource);
         }
         keys.add(key);
-        this.enqueue(new Event<>(this, Event.Type.SYNCHRONIZATION, null, null, resource));
+        this.enqueue(new Event<>(this, Event.Type.SYNCHRONIZATION, null, null /* oldResource; may get set later */, resource));
       }
 
       final Iterable<? extends T> knownObjects = this.getKnownObjects();
@@ -623,17 +623,16 @@ public class Reflector<T extends HasMetadata> implements Closeable {
 
   @Override
   public synchronized final void close() throws IOException {
-    if (this.watch != null) {
-      try {
+    try {
+      if (this.watch != null) {
         this.watch.close();
-      } finally {
-        if (this.distributorThread != null) {
-          this.distributorThread.interrupt();
-        }
-        this.onClose();
       }
+    } finally {
+      if (this.distributorThread != null) {
+        this.distributorThread.interrupt();
+      }
+      this.onClose();
     }
-
   }
 
   protected void onClose() {
@@ -689,6 +688,15 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   }
 
 
+  /**
+   * An {@link EventObject} representing an addition, modification or
+   * deletion of a Kubernetes resource.
+   *
+   * @author <a href="https://about.me/lairdnelson"
+   * target="_parent">Laird Nelson</a>
+   *
+   * @param <T> the type of Kubernetes resource described by this event
+   */
   public static final class Event<T extends HasMetadata> extends EventObject {
 
     private static final long serialVersionUID = 1L;
@@ -705,6 +713,9 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       super(source);
       this.key = key;
       this.type = key != null ? Type.DELETION : Objects.requireNonNull(type);
+      if (type.equals(Type.ADDITION) && oldResource != null) {
+        throw new IllegalArgumentException("type.equals(Type.ADDITION) && oldResource != null: " + oldResource);
+      }
       this.oldResource = oldResource;
       this.resource = resource;
     }
@@ -731,7 +742,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     private final void setOldResource(final T oldResource) {
       final T preexistingOldResource = this.getOldResource();
       if (preexistingOldResource != null) {
-        throw new IllegalStateException();
+        throw new IllegalStateException("getOldResource() != null: " + preexistingOldResource);
       }
       this.oldResource = oldResource;
     }
@@ -848,10 +859,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
 
     @Override
     public final String toString() {
-      final StringBuilder sb = new StringBuilder();
-      final Type type = this.getType();
-      sb.append(type).append(": ").append(this.getOldResource()).append(" -> ").append(this.getResource());
-      return sb.toString();      
+      return new StringBuilder(this.getType()).append(": ").append(this.getOldResource()).append(" -> ").append(this.getResource()).toString();
     }
 
     public static enum Type {
