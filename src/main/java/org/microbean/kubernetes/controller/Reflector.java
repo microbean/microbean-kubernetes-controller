@@ -47,57 +47,73 @@ import io.fabric8.kubernetes.api.model.ListMeta;
 
 import org.microbean.development.annotation.NonBlocking;
 
+/**
+ * 
+ */
 public class Reflector<T extends HasMetadata> implements Closeable {
 
   private final Object operation;
 
-  private volatile Object lastSyncResourceVersion;
+  private volatile Object lastSynchronizationResourceVersion;
 
-  private final ScheduledExecutorService resyncExecutorService;
+  private final ScheduledExecutorService synchronizationExecutorService;
 
-  private volatile ScheduledFuture<?> resyncTask;
+  private ScheduledFuture<?> synchronizationTask;
 
-  private final boolean shutdownResyncExecutorServiceOnClose;
+  private final boolean shutdownSynchronizationExecutorServiceOnClose;
 
-  private final Duration resyncInterval;
+  private final Duration synchronizationInterval;
 
-  private volatile Closeable watch;
+  private Closeable watch;
 
-  private final EventCache<T> eventQueues;
+  private final EventCache<T> eventCache;
+
+  @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
+  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
+                                                                                                                              final EventCache<T> eventCache) {
+    this(operation, eventCache, null, null);
+  }
   
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
                                                                                                                               final EventCache<T> eventCache,
-                                                                                                                              final ScheduledExecutorService resyncExecutorService,
-                                                                                                                              final Duration resyncInterval) {
+                                                                                                                              final Duration synchronizationInterval) {
+    this(operation, eventCache, null, synchronizationInterval);
+  }
+  
+  @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
+  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
+                                                                                                                              final EventCache<T> eventCache,
+                                                                                                                              final ScheduledExecutorService synchronizationExecutorService,
+                                                                                                                              final Duration synchronizationInterval) {
     super();
     Objects.requireNonNull(operation);
-    this.eventQueues = Objects.requireNonNull(eventCache);
+    this.eventCache = Objects.requireNonNull(eventCache);
     // TODO: research: maybe: operation.withField("metadata.resourceVersion", "0")?    
     this.operation = operation.withResourceVersion("0");
-    this.resyncInterval = resyncInterval;
-    if (resyncExecutorService == null) {
-      if (resyncInterval == null) {
-        this.resyncExecutorService = null;
-        this.shutdownResyncExecutorServiceOnClose = false;
+    this.synchronizationInterval = synchronizationInterval;
+    if (synchronizationExecutorService == null) {
+      if (synchronizationInterval == null) {
+        this.synchronizationExecutorService = null;
+        this.shutdownSynchronizationExecutorServiceOnClose = false;
       } else {
-        this.resyncExecutorService = Executors.newScheduledThreadPool(1);
-        this.shutdownResyncExecutorServiceOnClose = true;
+        this.synchronizationExecutorService = Executors.newScheduledThreadPool(1);
+        this.shutdownSynchronizationExecutorServiceOnClose = true;
       }
     } else {
-      this.resyncExecutorService = resyncExecutorService;
-      this.shutdownResyncExecutorServiceOnClose = false;
+      this.synchronizationExecutorService = synchronizationExecutorService;
+      this.shutdownSynchronizationExecutorServiceOnClose = false;
     }
   }
 
   @Override
   public synchronized final void close() throws IOException {
     try {
-      final ScheduledFuture<?> resyncTask = this.resyncTask;
-      if (resyncTask != null) {
-        resyncTask.cancel(false);
+      final ScheduledFuture<?> synchronizationTask = this.synchronizationTask;
+      if (synchronizationTask != null) {
+        synchronizationTask.cancel(false);
       }
-      this.closeResyncExecutorService();
+      this.closeSynchronizationExecutorService();
       if (this.watch != null) {
         this.watch.close();
       }
@@ -106,37 +122,37 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     }
   }
 
-  private synchronized final void closeResyncExecutorService() {
-    if (this.resyncExecutorService != null && this.shutdownResyncExecutorServiceOnClose) {
-      this.resyncExecutorService.shutdown();
+  private synchronized final void closeSynchronizationExecutorService() {
+    if (this.synchronizationExecutorService != null && this.shutdownSynchronizationExecutorServiceOnClose) {
+      this.synchronizationExecutorService.shutdown();
       try {
-        if (!this.resyncExecutorService.awaitTermination(60L, TimeUnit.SECONDS)) {
-          this.resyncExecutorService.shutdownNow();
-          if (!this.resyncExecutorService.awaitTermination(60L, TimeUnit.SECONDS)) {
-            this.resyncExecutorService.shutdownNow();
+        if (!this.synchronizationExecutorService.awaitTermination(60L, TimeUnit.SECONDS)) {
+          this.synchronizationExecutorService.shutdownNow();
+          if (!this.synchronizationExecutorService.awaitTermination(60L, TimeUnit.SECONDS)) {
+            this.synchronizationExecutorService.shutdownNow();
           }
         }
       } catch (final InterruptedException interruptedException) {
-        this.resyncExecutorService.shutdownNow();
+        this.synchronizationExecutorService.shutdownNow();
         Thread.currentThread().interrupt();
       }
     }
   }
 
-  protected boolean shouldResync() {
-    return this.resyncExecutorService != null;
+  protected boolean shouldSynchronize() {
+    return this.synchronizationExecutorService != null;
   }
   
-  private final Duration getResyncInterval() {
-    return this.resyncInterval;
+  private final Duration getSynchronizationInterval() {
+    return this.synchronizationInterval;
   }
 
-  private final Object getLastSyncResourceVersion() {
-    return this.lastSyncResourceVersion;
+  private final Object getLastSynchronizationResourceVersion() {
+    return this.lastSynchronizationResourceVersion;
   }
   
-  private final void setLastSyncResourceVersion(final Object resourceVersion) {
-    this.lastSyncResourceVersion = resourceVersion;
+  private final void setLastSynchronizationResourceVersion(final Object resourceVersion) {
+    this.lastSynchronizationResourceVersion = resourceVersion;
   }
 
   @NonBlocking
@@ -159,28 +175,28 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       } else {
         replacementItems = Collections.unmodifiableCollection(new ArrayList<>(items));
       }
-      synchronized (eventQueues) {
-        eventQueues.replace(replacementItems, resourceVersion);
+      synchronized (eventCache) {
+        eventCache.replace(replacementItems, resourceVersion);
       }
       
-      setLastSyncResourceVersion(resourceVersion);
+      setLastSynchronizationResourceVersion(resourceVersion);
       
-      if (resyncExecutorService != null) {
+      if (synchronizationExecutorService != null) {
         
-        final Duration resyncDuration = getResyncInterval();
+        final Duration synchronizationDuration = getSynchronizationInterval();
         final long seconds;
-        if (resyncDuration == null) {
+        if (synchronizationDuration == null) {
           seconds = 0L;
         } else {
-          seconds = resyncDuration.get(ChronoUnit.SECONDS);
+          seconds = synchronizationDuration.get(ChronoUnit.SECONDS);
         }
         
         if (seconds > 0L) {
-          final ScheduledFuture<?> job = resyncExecutorService.scheduleWithFixedDelay(() -> {
+          final ScheduledFuture<?> job = synchronizationExecutorService.scheduleWithFixedDelay(() -> {
               try {
-                if (shouldResync()) {
-                  synchronized (eventQueues) {
-                    eventQueues.resync();
+                if (shouldSynchronize()) {
+                  synchronized (eventCache) {
+                    eventCache.synchronize();
                   }
                 }
               } catch (final RuntimeException runtimeException) {
@@ -189,18 +205,18 @@ public class Reflector<T extends HasMetadata> implements Closeable {
               }
             }, 0L, seconds, TimeUnit.SECONDS);
           assert job != null;
-          resyncTask = job;
+          synchronizationTask = job;
         }
         
       }
 
       try {
         @SuppressWarnings("unchecked")
-          final Closeable temp = ((VersionWatchable<? extends Closeable, Watcher<T>>)operation).withResourceVersion(resourceVersion).watch(new WatchHandler());
+        final Closeable temp = ((VersionWatchable<? extends Closeable, Watcher<T>>)operation).withResourceVersion(resourceVersion).watch(new WatchHandler());
         assert temp != null;
         watch = temp;
       } finally {
-        this.closeResyncExecutorService();
+        this.closeSynchronizationExecutorService();
       }
     }
   }
@@ -227,29 +243,57 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       Objects.requireNonNull(resource);
       final ObjectMeta metadata = resource.getMetadata();
       assert metadata != null;
-      final Object newResourceVersion = metadata.getResourceVersion();
-      final Event<T> event;
+      final Event.Type eventType;
       switch (action) {
       case ADDED:
-        event = new Event<>(Reflector.this, Event.Type.ADDITION, null, resource);
+        eventType = Event.Type.ADDITION;
         break;
       case MODIFIED:
-        event = new Event<>(Reflector.this, Event.Type.MODIFICATION, null, resource);
+        eventType = Event.Type.MODIFICATION;
         break;
       case DELETED:
-        event = new Event<>(Reflector.this, Event.Type.DELETION, null, resource);
+        eventType = Event.Type.DELETION;
         break;
-      case ERROR:
-        event = null;
-        throw new IllegalStateException();
+      case ERROR:        
+        // TODO: Uh...the Go code has:
+        //
+        //   if event.Type == watch.Error {
+				//     return apierrs.FromObject(event.Object)
+        //   }
+        //
+        // Now, apierrs.FromObject is here:
+        // https://github.com/kubernetes/apimachinery/blob/kubernetes-1.9.2/pkg/api/errors/errors.go#L80-L88
+        // This is looking for a Status object.  But
+        // WatchConnectionHandler will never forward on such a thing:
+        // https://github.com/fabric8io/kubernetes-client/blob/v3.1.8/kubernetes-client/src/main/java/io/fabric8/kubernetes/client/dsl/internal/WatchConnectionManager.java#L246-L258
+        //
+        // So it follows that if by some chance we get here, resource
+        // will definitely be a HasMetadata.  We go back to the Go
+        // code again, and remember that if the type is Error, the
+        // equivalent of this watch handler simply returns and goes home.
+        //
+        // Now, if we were to throw a RuntimeException here, which is
+        // the idiomatic equivalent of returning and going home, this
+        // would cause a watch reconnect:
+        // https://github.com/fabric8io/kubernetes-client/blob/v3.1.8/kubernetes-client/src/main/java/io/fabric8/kubernetes/client/dsl/internal/WatchConnectionManager.java#L159-L205
+        // ...up to the reconnect limit.
+        //
+        // ...which is fine, but I'm not sure that in an error case a
+        // WatchEvent will ever HAVE a HasMetadata as its payload.
+        // Which means MAYBE we'll never get here.  But if we do, all
+        // we can do is throw a RuntimeException...which ends up
+        // reducing to the same case as the default case below, so we
+        // fall through.
       default:
-        event = null;
+        eventType = null;
         throw new IllegalStateException();
       }
-      synchronized (eventQueues) {
-        eventQueues.add(event);
+      if (eventType != null) {
+        synchronized (eventCache) {
+          eventCache.add(Reflector.this, eventType, resource);
+        }
       }
-      setLastSyncResourceVersion(newResourceVersion);
+      setLastSynchronizationResourceVersion(metadata.getResourceVersion());
     }
 
     @Override

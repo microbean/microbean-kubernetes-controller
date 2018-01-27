@@ -36,26 +36,175 @@ import io.fabric8.kubernetes.api.model.ObjectMeta;
 import org.microbean.development.annotation.Blocking;
 import org.microbean.development.annotation.NonBlocking;
 
+/**
+ * An {@link EventCache} that temporarily stores {@link Event}s in
+ * {@link EventQueue}s, one per named Kubernetes resource, and
+ * {@linkplain #start(Consumer) provides a means for processing those
+ * queues}.
+ *
+ * @param <T> a type of Kubernetes resource
+ *
+ * @author <a href="https://about.me/lairdnelson"
+ * target="_parent">Laird Nelson</a>
+ *
+ * @see #add(Object, Event.Type, HasMetadata)
+ *
+ * @see #replace(Collection, Object)
+ *
+ * @see #synchronize()
+ *
+ * @see #start(Consumer)
+ */
 public final class EventQueueCollection<T extends HasMetadata> implements EventCache<T>, Iterable<EventQueue<T>> {
 
+
+  /*
+   * Instance fields.
+   */
+
+
+  /**
+   * Whether this {@link EventQueueCollection} is in the process of
+   * {@linkplain #close() closing}.
+   *
+   * @see #close()
+   */
   private volatile boolean closing;
-  
-  private volatile boolean populated;
 
-  private volatile int initialPopulationCount;
+  /**
+   * Whether or not this {@link EventQueueCollection} has been
+   * populated via an invocation of the {@link #replace(Collection,
+   * Object)} method.
+   *
+   * <p>Mutations of this field must be synchronized on {@code
+   * this}.</p>
+   *
+   * @see #replace(Collection, Object)
+   */
+  private boolean populated;
 
-  private volatile Thread consumerThread;
-  
+  /**
+   * The number of {@link EventQueue}s that this {@link
+   * EventQueueCollection} was initially {@linkplain
+   * #replace(Collection, Object) seeded with}.
+   *
+   * <p>Mutations of this field must be synchronized on {@code
+   * this}.</p>
+   *
+   * @see #replace(Collection, Object)
+   */
+  private int initialPopulationCount;
+
+  /**
+   * A {@link Thread}, created by the {@link #start(Consumer)} method,
+   * that will eternally invoke the {@link #attach(Consumer)} method.
+   *
+   * <p>This field may be {@code null}.</p>
+   *
+   * <p>Mutations of this field must be synchronized on {@code
+   * this}.</p>
+   *
+   * @see #start(Consumer)
+   *
+   * @see #attach(Consumer)
+   */
+  private Thread consumerThread;
+
+  /**
+   * A {@link LinkedHashMap} of {@link EventQueue} instances, indexed
+   * by {@linkplain EventQueue#getKey() their keys}.
+   *
+   * <p>This field is never {@code null}.</p>
+   *
+   * <p>Mutations of the contents of this {@link LinkedHashMap} must
+   * be synchronized on {@code this}.</p>
+   *
+   * @see #add(Object, Event.Type, Resource)
+   */
   private final LinkedHashMap<Object, EventQueue<T>> map;
 
+  /**
+   * A {@link Map} containing the last known state of Kubernetes
+   * resources this {@link EventQueueCollection} is caching events
+   * for.  This field is used chiefly by the {@link #synchronize()}
+   * method, but by others as well.
+   *
+   * <p>This field may be {@code null}.</p>
+   *
+   * <p>Mutations of this field must be synchronized on this field's
+   * value.</p>
+   *
+   * @see #getKnownObjects()
+   *
+   * @see #synchronize()
+   */
   private final Map<?, ? extends T> knownObjects;
-  
+
+
+  /*
+   * Constructors.
+   */
+
+
+  /**
+   * Creates a new {@link EventQueueCollection} with an initial
+   * capacity of {@code 16} and a load factor of {@code 0.75} that is
+   * not interested in tracking Kubernetes resource deletions.
+   *
+   * @see #EventQueueCollection(Map, int, float)
+   */
+  public EventQueueCollection() {
+    this(null, 16, 0.75f);
+  }
+
+  /**
+   * Creates a new {@link EventQueueCollection} with an initial
+   * capacity of {@code 16} and a load factor of {@code 0.75}.
+   *
+   * @param knownObjects a {@link Map} containing the last known state
+   * of Kubernetes resources this {@link EventQueueCollection} is
+   * caching events for; may be {@code null} if this {@link
+   * EventQueueCollection} is not interested in tracking deletions of
+   * objects; if non-{@code null} <strong>will be synchronized on by
+   * this class</strong> during retrieval and traversal operations
+   *
+   * @see #EventQueueCollection(Map, int, float)
+   */
+  public EventQueueCollection(final Map<?, ? extends T> knownObjects) {
+    this(knownObjects, 16, 0.75f);
+  }
+
+  /**
+   * Creates a new {@link EventQueueCollection}.
+   *
+   * @param knownObjects a {@link Map} containing the last known state
+   * of Kubernetes resources this {@link EventQueueCollection} is
+   * caching events for; may be {@code null} if this {@link
+   * EventQueueCollection} is not interested in tracking deletions of
+   * objects; if non-{@code null} <strong>will be synchronized on by
+   * this class</strong> during retrieval and traversal operations
+   *
+   * @param initialCapacity the initial capacity of the internal data
+   * structure used to house this {@link EventQueueCollection}'s
+   * {@link EventQueue}s; must be an integer greater than {@code 0}
+   *
+   * @param loadFactor the load factor of the internal data structure
+   * used to house this {@link EventQueueCollection}'s {@link
+   * EventQueue}s; must be a positive number between {@code 0} and
+   * {@code 1}
+   */
   public EventQueueCollection(final Map<?, ? extends T> knownObjects, final int initialCapacity, final float loadFactor) {
     super();
     this.map = new LinkedHashMap<>(initialCapacity, loadFactor);
     this.knownObjects = knownObjects;
   }
 
+
+  /*
+   * Instance methods.
+   */
+
+  
   private final Map<?, ? extends T> getKnownObjects() {
     return this.knownObjects;
   }
@@ -63,12 +212,41 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
   private synchronized final boolean isEmpty() {
     return this.map.isEmpty();
   }
-  
+
+  /**
+   * Returns an {@link Iterator} of {@link EventQueue} instances that
+   * are created and managed by this {@link EventQueueCollection} as a
+   * result of the {@link #add(Object, Event.Type, HasMetadata)},
+   * {@link #replace(Collection, Object)} and {@link #synchronize()}
+   * methods.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>The returned {@link Iterator} implements the {@link
+   * Iterator#remove()} method properly.</p>
+   *
+   * @return a non-{@code null} {@link Iterator} of {@link
+   * EventQueue}s
+   */
   @Override
   public synchronized final Iterator<EventQueue<T>> iterator() {
     return this.map.values().iterator();
   }
 
+  /**
+   * Returns a {@link Spliterator} of {@link EventQueue} instances
+   * that are created and managed by this {@link EventQueueCollection}
+   * as a result of the {@link #add(Object, Event.Type, HasMetadata)},
+   * {@link #replace(Collection, Object)} and {@link #synchronize()}
+   * methods.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * @return a non-{@code null} {@link Spliterator} of {@link
+   * EventQueue}s
+   *
+   * @see Map#spliterator()
+   */
   @Override
   public synchronized final Spliterator<EventQueue<T>> spliterator() {
     return this.map.values().spliterator();
@@ -86,7 +264,7 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
   }
 
   @Override
-  public synchronized final void resync() {
+  public synchronized final void synchronize() {
     final Map<?, ? extends T> knownObjects = this.getKnownObjects();
     if (knownObjects != null) {
       synchronized (knownObjects) {
@@ -102,7 +280,7 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
                 if (key != null) {
                   final EventQueue<T> eventQueue = this.map.get(key);
                   if (eventQueue == null || eventQueue.isEmpty()) {
-                    this.add(new Event<>(this, Event.Type.SYNCHRONIZATION, null, knownObject));
+                    this.add(this, Event.Type.SYNCHRONIZATION, knownObject);
                   }
                 }
               }
@@ -128,7 +306,7 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
             throw new IllegalStateException("getKey(resource) == null: " + resource);
           }
           replacementKeys.add(replacementKey);
-          this.add(new Event<>(this, Event.Type.SYNCHRONIZATION, null, resource), false);
+          this.add(this, Event.Type.SYNCHRONIZATION, resource, false);
         }
       }
     }
@@ -152,7 +330,12 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
               assert newestEvent != null;
               final T resourceToBeDeleted = newestEvent.getResource();
               assert resourceToBeDeleted != null;
-              this.add(new Event<>(this, Event.Type.DELETION, key, resourceToBeDeleted), false);
+              final Event<T> event = this.createEvent(this, Event.Type.DELETION, resourceToBeDeleted);
+              if (event == null) {
+                throw new IllegalStateException("createEvent() == null");
+              }
+              event.setKey(key);
+              this.add(event, false);
             }
           }
         }
@@ -168,7 +351,12 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
               if (entry != null) {
                 final Object knownKey = entry.getKey();
                 if (!replacementKeys.contains(knownKey)) {
-                  this.add(new Event<>(this, Event.Type.DELETION, knownKey, entry.getValue()), false);
+                  final Event<T> event = this.createEvent(this, Event.Type.DELETION, entry.getValue());
+                  if (event == null) {
+                    throw new IllegalStateException("createEvent() == null");
+                  }
+                  event.setKey(knownKey);
+                  this.add(event, false);
                   queuedDeletions++;
                 }
               }
@@ -249,8 +437,10 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
       } catch (final InterruptedException interruptedException) {
         Thread.currentThread().interrupt();
       } finally {
-        this.consumerThread = null;
-        this.closing = false;
+        synchronized (this) {
+          this.consumerThread = null;
+          this.closing = false;
+        }
       }
     }
   }
@@ -326,12 +516,27 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
     return returnValue;
   }
 
+  protected Event<T> createEvent(final Object source, final Event.Type eventType, final T resource) {
+    Objects.requireNonNull(source);
+    Objects.requireNonNull(eventType);
+    Objects.requireNonNull(resource);
+    return new Event<>(source, eventType, resource);
+  }
+  
   @Override
-  public final boolean add(final Event<T> event) {
-    return this.add(event, true);
+  public final Event<T> add(final Object source, final Event.Type eventType, final T resource) {
+    return this.add(source, eventType, resource, true);
   }
 
-  private final boolean add(final Event<T> event, final boolean populate) {
+  private final Event<T> add(final Object source, final Event.Type eventType, final T resource, final boolean populate) {
+    final Event<T> event = this.createEvent(source, eventType, resource);
+    if (event == null) {
+      throw new IllegalStateException("createEvent() == null");
+    }
+    return this.add(event, populate);
+  }
+
+  private final Event<T> add(final Event<T> event, final boolean populate) {
     Objects.requireNonNull(event);
     final Object key = event.getKey();
     if (key == null) {
@@ -341,7 +546,7 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
       this.populated = true;
     }
     
-    boolean returnValue = false;
+    Event<T> returnValue = null;
     EventQueue<T> eventQueue;
     synchronized (this) {
       eventQueue = this.map.get(key);
@@ -353,11 +558,14 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
         }
       }
       synchronized (eventQueue) {
-        returnValue = eventQueue.add(event);
+        if (eventQueue.add(event)) {
+          returnValue = event;
+        }
         if (eventQueue.isEmpty()) {
           // Compression might have emptied the queue, so an add could
           // result in an empty queue.
           if (eventQueueExisted) {
+            returnValue = null;
             this.map.remove(key);
           }
         } else if (!eventQueueExisted) {

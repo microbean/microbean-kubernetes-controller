@@ -26,7 +26,7 @@ public class Event<T extends HasMetadata> extends EventObject {
 
   private static final long serialVersionUID = 1L;
   
-  private final Object key;
+  Object key;
   
   private final Type type;
   
@@ -55,7 +55,11 @@ public class Event<T extends HasMetadata> extends EventObject {
     return this.key == null;
   }
 
-  public final Object getKey() {
+  final void setKey(final Object key) {
+    this.key = key;
+  }
+  
+  public Object getKey() {
     Object returnValue = this.key;
     if (returnValue == null) {
       final T resource = this.getResource();
