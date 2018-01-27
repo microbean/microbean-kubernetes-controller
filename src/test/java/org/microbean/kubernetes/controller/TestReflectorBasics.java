@@ -1,6 +1,6 @@
 /* -*- mode: Java; c-basic-offset: 2; indent-tabs-mode: nil; coding: utf-8-unix -*-
  *
- * Copyright © 2017 MicroBean.
+ * Copyright © 2017-2018 microBean.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,12 +22,15 @@ import java.time.Duration;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
+import java.util.function.Consumer;
 
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapList;
@@ -40,9 +43,11 @@ import io.fabric8.kubernetes.client.DefaultKubernetesClient;
 import io.fabric8.kubernetes.client.dsl.Listable;
 import io.fabric8.kubernetes.client.dsl.VersionWatchable;
 
+import org.junit.Ignore;
 import org.junit.Test;
 
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeFalse;
 
@@ -55,26 +60,61 @@ public class TestReflectorBasics {
     super();
   }
 
+  // @Ignore
   @Test
   public void testBasics() throws Exception {
     assumeFalse(Boolean.getBoolean("skipClusterTests"));
+
     final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(2);
     assertNotNull(executorService);
+
     final DefaultKubernetesClient client = new DefaultKubernetesClient();
+
+    final Map<Object, ConfigMap> configMaps = new HashMap<>();
+    final EventQueueCollection<ConfigMap> eventQueues = new EventQueueCollection<>(configMaps, 16, 0.75f);
+    
+    final Consumer<? super EventQueue<? extends ConfigMap>> siphon = (q) -> {
+      assertNotNull(q);
+      assertFalse(q.isEmpty());
+      for (final Event<? extends ConfigMap> event : q) {
+        assertNotNull(event);
+        System.out.println("*** received event: " + event);
+        final Event.Type type = event.getType();
+        assertNotNull(type);
+        switch (type) {
+        case DELETION:
+          configMaps.remove(event.getKey());
+          break;
+        default:
+          configMaps.put(event.getKey(), event.getResource());
+          break;
+        }
+      }
+    };
+
+    // Begin sucking EventQueue instances out of the cache.  Obviously
+    // there aren't any yet.  This creates a new (daemon) Thread and
+    // starts it.
+    eventQueues.start(siphon);
+
     final Reflector<ConfigMap> reflector =
       new Reflector<ConfigMap>(client.configMaps(),
+                               eventQueues,
                                executorService,
                                Duration.ofSeconds(10));
-    System.out.println("*** running reflector");
+
+    // Begin effectively putting EventQueue instances into the cache.
+    // This creates a new (daemon) Thread and starts it.
     reflector.start();
-    System.out.println("*** sleeping");
-    Thread.sleep(10L * 60L * 1000L);
-    System.out.println("*** closing reflector");
+    
+    Thread.sleep(1L * 60L * 1000L);
+
+    // Shut down production of events.
     reflector.close();
-    System.out.println("*** reflector closed");
-    System.out.println("*** closing client");
     client.close();
-    System.out.println("*** client closed");
+
+    // Shut down reception of events.
+    eventQueues.close();
   }
 
   public static final void main(final String[] args) throws Exception {

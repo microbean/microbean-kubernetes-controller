@@ -3,4 +3,4 @@ apiVersion: v1
 metadata:
   name: "00"
 data:
-  foo: barbar
+  foo: barbarbar

@@ -1,0 +1,23 @@
+* Replace
+For every resource in the list
+get its key and add it to a key set
+fire a sync event with the resource
+  get the key of the resource
+  check if the resource would be deleted (requires past state)
+    if so, return
+  append a new delta of type SYNC to the queue of such deltas indexed under the key
+    there may be no such queue in which case this effectively creates it
+  deduplicate the list
+  compress the list
+  see if there was actually a queue of deltas for that key
+  if our append resulted in some new deltas
+    if there wasn't a queue of deltas for that key
+    
+* Popping and removal
+
+In the Go code you have "queue" which is a sequence of keys.
+Then you have "items" which is a map of keys to event queues.
+
+We block on the queue, waiting for a new key.
+Then we take the first item on the queue and remove it.
+Then we look up the event queue
