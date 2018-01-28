@@ -34,6 +34,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
+import io.fabric8.kubernetes.client.DefaultKubernetesClient; // for javadoc only
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watcher;
 
@@ -53,6 +54,13 @@ import org.microbean.development.annotation.NonBlocking;
  * HasMetadata) adds them} to an {@link EventCache} so as to logically
  * "reflect" the contents of Kubernetes into the cache.
  *
+ * <h2>Thread Safety</h2>
+ *
+ * <p>Instances of this class are safe for concurrent use by multiple
+ * {@link Thread}s.</p>
+ *
+ * @param <T> a type of Kubernetes resource
+ *
  * @author <a href="https://about.me/lairdnelson"
  * target="_parent">Laird Nelson</a>
  *
@@ -65,9 +73,27 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * Instance fields.
    */
 
-  
+
+  /**
+   * The operation that was supplied at construction time.
+   *
+   * <p>This field is never {@code null}.</p>
+   *
+   * <p>It is guaranteed that the value of this field may be
+   * assignable to a reference of type {@link Listable Listable&lt;?
+   * extends KubernetesResourceList&gt;} or to a reference of type
+   * {@link VersionWatchable VersionWatchable&lt;? extends Closeable,
+   * Watcher&lt;T&gt;&gt;}.</p>
+   *
+   * @see Listable
+   *
+   * @see VersionWatchable
+   */
   private final Object operation;
 
+  /**
+   * The resource version 
+   */
   private volatile Object lastSynchronizationResourceVersion;
 
   private final ScheduledExecutorService synchronizationExecutorService;
@@ -87,20 +113,90 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * Constructors.
    */
 
-  
+
+  /**
+   * Creates a new {@link Reflector}.
+   *
+   * @param <X> a type that is both an appropriate kind of {@link
+   * Listable} and {@link VersionWatchable}, such as the kind of
+   * operation returned by {@link
+   * DefaultKubernetesClient#configMaps()} and the like
+   *
+   * @param operation a {@link Listable} and a {@link
+   * VersionWatchable} that can report information from a Kubernetes
+   * cluster; must not be {@code null}
+   *
+   * @param eventCache an {@link EventCache} <strong>that will be
+   * synchronized on</strong> and into which {@link Event}s will be
+   * logically "reflected"; must not be {@code null}
+   *
+   * @see #start()
+   */
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
                                                                                                                               final EventCache<T> eventCache) {
     this(operation, eventCache, null, null);
   }
-  
+
+  /**
+   * Creates a new {@link Reflector}.
+   *
+   * @param <X> a type that is both an appropriate kind of {@link
+   * Listable} and {@link VersionWatchable}, such as the kind of
+   * operation returned by {@link
+   * DefaultKubernetesClient#configMaps()} and the like
+   *
+   * @param operation a {@link Listable} and a {@link
+   * VersionWatchable} that can report information from a Kubernetes
+   * cluster; must not be {@code null}
+   *
+   * @param eventCache an {@link EventCache} <strong>that will be
+   * synchronized on</strong> and into which {@link Event}s will be
+   * logically "reflected"; must not be {@code null}
+   *
+   * @param synchronizationInterval a {@link Duration} representing
+   * the time in between one {@linkplain EventCache#synchronize()
+   * synchronization operation} and another; may be {@code null} in
+   * which case no synchronization will occur
+   *
+   * @see #start()
+   */
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
                                                                                                                               final EventCache<T> eventCache,
                                                                                                                               final Duration synchronizationInterval) {
     this(operation, eventCache, null, synchronizationInterval);
   }
-  
+
+  /**
+   * Creates a new {@link Reflector}.
+   *
+   * @param <X> a type that is both an appropriate kind of {@link
+   * Listable} and {@link VersionWatchable}, such as the kind of
+   * operation returned by {@link
+   * DefaultKubernetesClient#configMaps()} and the like
+   *
+   * @param operation a {@link Listable} and a {@link
+   * VersionWatchable} that can report information from a Kubernetes
+   * cluster; must not be {@code null}
+   *
+   * @param eventCache an {@link EventCache} <strong>that will be
+   * synchronized on</strong> and into which {@link Event}s will be
+   * logically "reflected"; must not be {@code null}
+   *
+   * @param synchronizationExecutorService a {@link
+   * ScheduledExecutorService} to be used to tell the supplied {@link
+   * EventCache} to {@linkplain EventCache#synchronize() synchronize}
+   * on a schedule; may be {@code null} in which case no
+   * synchronization will occur
+   *
+   * @param synchronizationInterval a {@link Duration} representing
+   * the time in between one {@linkplain EventCache#synchronize()
+   * synchronization operation} and another; may be {@code null} in
+   * which case no synchronization will occur
+   *
+   * @see #start()
+   */
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
                                                                                                                               final EventCache<T> eventCache,
@@ -132,6 +228,16 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    */
   
 
+  /**
+   * Notionally closes this {@link Reflector} by terminating any
+   * {@link Thread}s that it has started and invoking the {@link
+   * #onClose()} method while holding this {@link Reflector}'s
+   * monitor.
+   *
+   * @exception IOException if an error occurs
+   *
+   * @see #onClose()
+   */
   @Override
   public synchronized final void close() throws IOException {
     try {
@@ -165,6 +271,57 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     }
   }
 
+  private synchronized final void setUpSynchronization() {
+    if (this.synchronizationExecutorService != null) {
+      
+      final Duration synchronizationDuration = this.getSynchronizationInterval();
+      final long seconds;
+      if (synchronizationDuration == null) {
+        seconds = 0L;
+      } else {
+        seconds = synchronizationDuration.get(ChronoUnit.SECONDS);
+      }
+        
+      if (seconds > 0L) {
+        final ScheduledFuture<?> job = this.synchronizationExecutorService.scheduleWithFixedDelay(() -> {
+            try {
+              if (shouldSynchronize()) {
+                synchronized (eventCache) {
+                  eventCache.synchronize();
+                }
+              }
+            } catch (final RuntimeException runtimeException) {
+              // TODO: log or...?
+              throw runtimeException;
+            }
+          }, 0L, seconds, TimeUnit.SECONDS);
+        assert job != null;
+        this.synchronizationTask = job;
+      }
+      
+    }
+  }
+
+  /**
+   * Whether, at any given moment, this {@link Reflector} should cause
+   * its {@link EventCache} to {@linkplain EventCache#synchronize()
+   * synchronize}.
+   *
+   * <h2>Design Notes</h2>
+   *
+   * <p>This code follows the Go code in the Kubernetes {@code
+   * client-go/tools/cache} package.  One thing that becomes clear
+   * when looking at all of this through an object-oriented lens is
+   * that it is the {@link EventCache} (the {@code delta_fifo}, in the
+   * Go code) that is ultimately in charge of synchronizing.  It is
+   * not clear why this is a function of a reflector.  In an
+   * object-oriented world, perhaps the {@link EventCache} itself
+   * should be in charge of resynchronization schedules.</p>
+   *
+   * @return {@code true} if this {@link Reflector} should cause its
+   * {@link EventCache} to {@linkplain EventCache#synchronize()
+   * synchronize}; {@code false} otherwise
+   */
   protected boolean shouldSynchronize() {
     return this.synchronizationExecutorService != null;
   }
@@ -181,19 +338,35 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     this.lastSynchronizationResourceVersion = resourceVersion;
   }
 
+  /**
+   * Using the {@code operation} supplied at construction time,
+   * {@linkplain Listable#list() lists} appropriate Kubernetes
+   * resources, and then, on a separate {@link Thread}, {@linkplain
+   * VersionWatchable sets up a watch} on them, calling {@link
+   * EventCache#replace(Collection, Object)} and {@link
+   * EventCache#add(Object, Event.Type, HasMetadata)} methods as
+   * appropriate.
+   *
+   * <p>The calling {@link Thread} is not blocked by invocations of
+   * this method.</p>
+   *
+   * @see #close()
+   */
   @NonBlocking
   public synchronized final void start() {
     if (this.watch == null) {
+
+      // Run a list operation, and get the resourceVersion of that list.
       @SuppressWarnings("unchecked")
-      final KubernetesResourceList<? extends T> list = ((Listable<? extends KubernetesResourceList<? extends T>>)operation).list();
+      final KubernetesResourceList<? extends T> list = ((Listable<? extends KubernetesResourceList<? extends T>>)this.operation).list();
       assert list != null;
-      
       final ListMeta metadata = list.getMetadata();
-      assert metadata != null;
-      
+      assert metadata != null;      
       final String resourceVersion = metadata.getResourceVersion();
       assert resourceVersion != null;
-      
+
+      // Using the results of that list operation, do a full replace
+      // on the EventCache with them.
       final Collection<? extends T> replacementItems;
       final Collection<? extends T> items = list.getItems();
       if (items == null || items.isEmpty()) {
@@ -202,52 +375,37 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         replacementItems = Collections.unmodifiableCollection(new ArrayList<>(items));
       }
       synchronized (eventCache) {
-        eventCache.replace(replacementItems, resourceVersion);
-      }
-      
-      setLastSynchronizationResourceVersion(resourceVersion);
-      
-      if (synchronizationExecutorService != null) {
-        
-        final Duration synchronizationDuration = getSynchronizationInterval();
-        final long seconds;
-        if (synchronizationDuration == null) {
-          seconds = 0L;
-        } else {
-          seconds = synchronizationDuration.get(ChronoUnit.SECONDS);
-        }
-        
-        if (seconds > 0L) {
-          final ScheduledFuture<?> job = synchronizationExecutorService.scheduleWithFixedDelay(() -> {
-              try {
-                if (shouldSynchronize()) {
-                  synchronized (eventCache) {
-                    eventCache.synchronize();
-                  }
-                }
-              } catch (final RuntimeException runtimeException) {
-                // TODO: log or...?
-                throw runtimeException;
-              }
-            }, 0L, seconds, TimeUnit.SECONDS);
-          assert job != null;
-          synchronizationTask = job;
-        }
-        
+        this.eventCache.replace(replacementItems, resourceVersion);
       }
 
+      // Record the resource version we captured during our list
+      // operation.
+      this.setLastSynchronizationResourceVersion(resourceVersion);
+
+      // Now that we've vetted that our list operation works (i.e. no
+      // syntax errors, no connectivity problems) we can schedule
+      // resynchronizations if necessary.
+      this.setUpSynchronization();
+
+      // Now that we've taken care of our list() operation, set up our
+      // watch() operation.
       try {
         @SuppressWarnings("unchecked")
         final Closeable temp = ((VersionWatchable<? extends Closeable, Watcher<T>>)operation).withResourceVersion(resourceVersion).watch(new WatchHandler());
         assert temp != null;
-        watch = temp;
+        this.watch = temp;
       } finally {
         this.closeSynchronizationExecutorService();
       }
     }
   }
 
-  protected void onClose() {
+  /**
+   * Invoked when {@link #close()} is invoked.
+   *
+   * <p>The default implementation of this method does nothing.</p>
+   */
+  protected synchronized void onClose() {
 
   }
   
@@ -257,19 +415,64 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    */
   
 
+  /**
+   * A {@link Watcher} of Kubernetes resources.
+   *
+   * @author <a href="https://about.me/lairdnelson"
+   * target="_parent">Laird Nelson</a>
+   *
+   * @see Watcher
+   */
   private final class WatchHandler implements Watcher<T> {
 
+
+    /*
+     * Constructors.
+     */
+
+    
+    /**
+     * Creates a new {@link WatchHandler}.
+     */
     private WatchHandler() {
       super();
     }
+
+
+    /*
+     * Instance methods.
+     */
     
+
+    /**
+     * Calls the {@link EventCache#add(Object, Event.Type,
+     * HasMetadata)} method on the enclosing {@link Reflector}'s
+     * associated {@link EventCache} with information harvested from
+     * the supplied {@code resource}, and using an {@link Event.Type}
+     * selected appropriately given the supplied {@link
+     * Watcher.Action}.
+     *
+     * @param action the kind of Kubernetes event that happened; must
+     * not be {@code null}
+     *
+     * @param resource the {@link HasMetadata} object that was
+     * affected; must not be {@code null}
+     *
+     * @exception NullPointerException if {@code action} or {@code
+     * resource} was {@code null}
+     *
+     * @exception IllegalStateException if another error occurred
+     */
     @Override
     public final void eventReceived(final Watcher.Action action, final T resource) {
       Objects.requireNonNull(action);
       Objects.requireNonNull(resource);
+
       final ObjectMeta metadata = resource.getMetadata();
       assert metadata != null;
+
       final Event.Type eventType;
+
       switch (action) {
       case ADDED:
         eventType = Event.Type.ADDITION;
@@ -314,14 +517,26 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         eventType = null;
         throw new IllegalStateException();
       }
+
+      // Add an Event of the proper kind to our EventCache.
       if (eventType != null) {
         synchronized (eventCache) {
           eventCache.add(Reflector.this, eventType, resource);
         }
       }
+
+      // Record the most recent resource version we're tracking to be
+      // that of this last successful watch() operation.  We set it
+      // earlier during a list() operation.
       setLastSynchronizationResourceVersion(metadata.getResourceVersion());
     }
 
+    /**
+     * Invoked when the Kubernetes client connection closes.
+     *
+     * @param exception any {@link KubernetesClientException} that
+     * caused this closing to happen; may be {@code null}
+     */
     @Override
     public final void onClose(final KubernetesClientException exception) {
       // Note that exception can be null.
