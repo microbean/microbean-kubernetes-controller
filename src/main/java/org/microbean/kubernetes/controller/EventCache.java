@@ -35,6 +35,8 @@ import io.fabric8.kubernetes.api.model.HasMetadata;
  * target="_parent">Laird Nelson</a>
  *
  * @see Event
+ *
+ * @see EventQueueCollection
  */
 public interface EventCache<T extends HasMetadata> {
 

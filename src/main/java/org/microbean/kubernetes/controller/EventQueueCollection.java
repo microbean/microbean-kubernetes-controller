@@ -42,6 +42,14 @@ import org.microbean.development.annotation.NonBlocking;
  * {@linkplain #start(Consumer) provides a means for processing those
  * queues}.
  *
+ * <h2>Thread Safety</h2>
+ *
+ * <p>This class is safe for concurrent use by multiple {@link
+ * Thread}s.  Some operations, like the usage of the {@link
+ * #iterator()} method, require that callers synchronize on the {@link
+ * EventQueue} directly.  This class' internals synchronize on {@code
+ * this} when locking is needed.</p>
+ *
  * @param <T> a type of Kubernetes resource
  *
  * @author <a href="https://about.me/lairdnelson"
@@ -54,8 +62,10 @@ import org.microbean.development.annotation.NonBlocking;
  * @see #synchronize()
  *
  * @see #start(Consumer)
+ *
+ * @see EventQueue
  */
-public final class EventQueueCollection<T extends HasMetadata> implements EventCache<T>, Iterable<EventQueue<T>> {
+public final class EventQueueCollection<T extends HasMetadata> implements EventCache<T>, Iterable<EventQueue<T>>, AutoCloseable {
 
 
   /*
@@ -220,17 +230,20 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
    * {@link #replace(Collection, Object)} and {@link #synchronize()}
    * methods.
    *
+   * <p>To call this method and then use this {@link Iterator} you
+   * must synchronize on this {@link EventQueueCollection}.</p>
+   *
    * <p>This method never returns {@code null}.</p>
    *
-   * <p>The returned {@link Iterator} implements the {@link
-   * Iterator#remove()} method properly.</p>
+   * <p>The returned {@link Iterator}'s {@link Iterator#remove()}
+   * method throws an {@link UnsupportedOperationException}.</p>
    *
    * @return a non-{@code null} {@link Iterator} of {@link
    * EventQueue}s
    */
   @Override
   public synchronized final Iterator<EventQueue<T>> iterator() {
-    return this.map.values().iterator();
+    return Collections.unmodifiableMap(this.map).values().iterator();
   }
 
   /**
@@ -240,18 +253,30 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
    * {@link #replace(Collection, Object)} and {@link #synchronize()}
    * methods.
    *
+   * <p>To call this method and then use this {@link Spliterator} you
+   * must synchronize on this {@link EventQueueCollection}.</p>
+   *
    * <p>This method never returns {@code null}.</p>
    *
    * @return a non-{@code null} {@link Spliterator} of {@link
    * EventQueue}s
    *
-   * @see Map#spliterator()
+   * @see Collection#spliterator()
    */
   @Override
   public synchronized final Spliterator<EventQueue<T>> spliterator() {
     return this.map.values().spliterator();
   }
 
+  /**
+   * Invokes the {@link Consumer#accept(Object)} method for each
+   * {@link EventQueue} stored by this {@link EventQueueCollection}.
+   *
+   * @param a {@link Consumer} of {@link EventQueue}s; may be {@code
+   * null} in which case no action will be taken
+   *
+   * @see Iterable#forEach(Consumer)
+   */
   @Override
   public synchronized final void forEach(final Consumer<? super EventQueue<T>> action) {
     if (action != null && !this.isEmpty()) {
@@ -259,10 +284,32 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
     }
   }
 
-  synchronized final boolean getHasSynced() {
+  /**
+   * Returns {@code true} if this {@link EventQueueCollection} has
+   * been populated via a call to {@link #add(Object, Event.Type,
+   * HasMetadata)} at some point, and if there are no {@link
+   * EventQueue}s remaining to be {@linkplain #start(Consumer)
+   * removed}.
+   *
+   * @see #replace(Collection, Object)
+   *
+   * @see #add(Object, Event.Type, HasMetadata)
+   *
+   * @see #synchronize()
+   */
+  public synchronized final boolean isSynchronized() {
     return this.populated && this.initialPopulationCount == 0;
   }
 
+  /**
+   * <strong>Synchronizes on the {@code knownObjects} object</strong>
+   * {@linkplain #EventQueueCollection(Map, int, float) supplied at
+   * construction time}, if there is one, and, for every Kubernetes
+   * resource found within at the time of this call, {@linkplain
+   * #add(Object, Event.Type, HasMetadata) adds an <code>Event</code>}
+   * with an {@link Event.Type} of {@link Event.Type#SYNCHRONIZATION}
+   * for it.
+   */
   @Override
   public synchronized final void synchronize() {
     final Map<?, ? extends T> knownObjects = this.getKnownObjects();
@@ -291,22 +338,65 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
     }
   }
 
+  /**
+   * At a high level, fully replaces the internal state of this {@link
+   * EventQueueCollection} to reflect only the Kubernetes resources
+   * contained in the supplied {@link Collection}, notionally firing
+   * {@link Event}s of type {@link Event.Type#SYNCHRONIZATION} and
+   * {@link Event.Type#DELETION} as appropriate.
+   *
+   * <p>{@link EventQueue}s managed by this {@link
+   * EventQueueCollection} that have not yet {@linkplain
+   * #start(Consumer) been processed} are not removed by this
+   * operation.</p>
+   *
+   * <p><strong>This method synchronizes on the supplied {@code
+   * incomingResources} {@link Collection}</strong> while iterating
+   * over it.</p>
+   *
+   * @param incomingResources the {@link Collection} of Kubernetes
+   * resources with which to replace this {@link
+   * EventQueueCollection}'s internal state; may be {@code null} or
+   * {@linkplain Collection#isEmpty() empty}, which will be taken as
+   * an indication that this {@link EventQueueCollection} should
+   * effectively be emptied
+   *
+   * @param resourceVersion the version of the Kubernetes list
+   * resource that contained the incoming resources; currently
+   * ignored; may be {@code null}
+   *
+   * @exception IllegalStateException if the {@link
+   * #createEvent(Object, Event.Type, HasMetadata)} method returns
+   * {@code null} for any reason
+   *
+   * @see Event.Type#SYNCHRONIZATION
+   *
+   * @see #createEvent(Object, Event.Type, HasMetadata)
+   */
   @Override
   public synchronized final void replace(final Collection<? extends T> incomingResources, final Object resourceVersion) {
-    Objects.requireNonNull(incomingResources);
+    
+    final int size;
     final Set<Object> replacementKeys;
-    if (incomingResources.isEmpty()) {
+
+    if (incomingResources == null) {
+      size = 0;
       replacementKeys = Collections.emptySet();
     } else {
-      replacementKeys = new HashSet<>();
-      for (final T resource : incomingResources) {
-        if (resource != null) {
-          final Object replacementKey = this.getKey(resource);
-          if (replacementKey == null) {
-            throw new IllegalStateException("getKey(resource) == null: " + resource);
+      synchronized (incomingResources) {
+        if (incomingResources.isEmpty()) {
+          size = 0;
+          replacementKeys = Collections.emptySet();
+        } else {
+          size = incomingResources.size();
+          assert size > 0;
+          replacementKeys = new HashSet<>();
+          for (final T resource : incomingResources) {
+            if (resource != null) {
+              replacementKeys.add(this.getKey(resource));
+              this.add(this, Event.Type.SYNCHRONIZATION, resource, false);
+            }
           }
-          replacementKeys.add(replacementKey);
-          this.add(this, Event.Type.SYNCHRONIZATION, resource, false);
         }
       }
     }
@@ -318,26 +408,54 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
 
       for (final EventQueue<T> eventQueue : this.map.values()) {
         assert eventQueue != null;
+        final Object key;
+        final Event<? extends T> newestEvent;
         synchronized (eventQueue) {
           if (eventQueue.isEmpty()) {
+            newestEvent = null;
+            key = null;
             assert false : "eventQueue.isEmpty(): " + eventQueue;
           } else {
-            final Object key = eventQueue.getKey();
-            if (!replacementKeys.contains(key)) {
-              // We have an event queue indexed under a key that no
-              // longer exists in Kubernetes.
-              final Event<? extends T> newestEvent = eventQueue.getLast();
+            key = eventQueue.getKey();
+            if (key == null) {
+              throw new IllegalStateException();
+            }
+            if (replacementKeys.contains(key)) {
+              newestEvent = null;
+            } else {
+              // We have an EventQueue indexed under a key that
+              // identifies a resource that no longer exists in
+              // Kubernetes.  Inform any consumers via a deletion
+              // event that this object was removed at some point from
+              // Kubernetes.  The state of the object in question is
+              // indeterminate.
+              newestEvent = eventQueue.getLast();
               assert newestEvent != null;
-              final T resourceToBeDeleted = newestEvent.getResource();
-              assert resourceToBeDeleted != null;
-              final Event<T> event = this.createEvent(this, Event.Type.DELETION, resourceToBeDeleted);
-              if (event == null) {
-                throw new IllegalStateException("createEvent() == null");
-              }
-              event.setKey(key);
-              this.add(event, false);
             }
           }
+        }
+        if (newestEvent != null) {
+          assert key != null;
+          // We grab the last event in the queue in question and get
+          // his resource; this will serve as the state of the
+          // Kubernetes resource in question the last time we knew
+          // about it.  This state is not necessarily, but could be,
+          // the true actual last state of the resource in question.
+          // The point is, the true state of the object when it was
+          // deleted is unknown.  We build a new event to reflect all
+          // this.
+          //
+          // Astute readers will realize that this could result in two
+          // DELETION events enqueued, back to back, with identical
+          // payloads.  See the deduplicate() method in EventQueue.
+          final T resourceToBeDeleted = newestEvent.getResource();
+          assert resourceToBeDeleted != null;
+          final Event<T> event = this.createEvent(this, Event.Type.DELETION, resourceToBeDeleted);
+          if (event == null) {
+            throw new IllegalStateException("createEvent() == null");
+          }
+          event.setKey(key);
+          this.add(event, false);
         }
       }
       
@@ -369,11 +487,31 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
       
     if (!this.populated) {
       this.populated = true;
-      this.initialPopulationCount = incomingResources.size() + queuedDeletions;
+      this.initialPopulationCount = size + queuedDeletions;
     }
     
   }
 
+  /**
+   * Returns an {@link Object} which will be used as the key that will
+   * uniquely identify the supplied {@code resource} to this {@link
+   * EventQueueCollection}.
+   *
+   * <p>This method may return {@code null}, but only if {@code
+   * resource} is {@code null} or is constructed in such a way that
+   * its {@link HasMetadata#getMetadata()} method returns {@code
+   * null}.</p>
+   *
+   * <p>Overrides of this method may return {@code null}, but only if
+   * {@code resource} is {@code null}.
+   *
+   * @param resource a {@link HasMetadata} for which a key should be
+   * returned; may be {@code null} in which case {@code null} may be
+   * returned
+   *
+   * @return a non-{@code null} key for the supplied {@code resource};
+   * or {@code null} if {@code resource} is {@code null}
+   */
   protected Object getKey(final T resource) {
     final Object returnValue;
     if (resource == null) {
@@ -400,10 +538,42 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
     return returnValue;
   }
 
+  /**
+   * Creates a new {@link EventQueue} suitable for holding {@link
+   * Event}s {@linkplain Event#getKey() matching} the supplied {@code
+   * key}.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>Overrides of this method must not return {@code null}.</p>
+   *
+   * @param the key {@linkplain EventQueue#getKey() for the new
+   * <code>EventQueue</code>}; must not be {@code null}
+   *
+   * @return the new {@link EventQueue}; never {@code null}
+   *
+   * @exception NullPointerException if {@code key} is {@code null}
+   *
+   * @see EventQueue#EventQueue(Object)
+   */
   protected EventQueue<T> createEventQueue(final Object key) {
     return new EventQueue<T>(key);
   }
 
+  /**
+   * Starts a new {@linkplain Thread#isDaemon() daemon} {@link Thread}
+   * that, until {@link #close()} is called, removes {@link
+   * EventQueue}s from this {@link EventQueueCollection} and supplies
+   * them to the supplied {@link Consumer}.
+   *
+   * <p>Invoking this method does not block the calling {@link
+   * Thread}.</p>
+   *
+   * @param siphon the {@link Consumer} that will process each {@link
+   * EventQueue} as it becomes ready; must not be {@code null}
+   *
+   * @exception NullPointerException if {@code siphon} is {@code null}
+   */
   @NonBlocking
   public final void start(final Consumer<? super EventQueue<? extends T>> siphon) {
     Objects.requireNonNull(siphon);
@@ -422,6 +592,21 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
     }
   }
 
+  /**
+   * Semantically closes this {@link EventQueueCollection} by
+   * detaching any {@link Consumer} previously attached via the {@link
+   * #start(Consumer)} method.  {@linkplain #add(Object, Event.Type,
+   * HasMetadata) Additions}, {@linkplain #replace(Collection, Object)
+   * replacements} and {@linkplain #synchronize() synchronizations}
+   * are still possible, but there won't be anything consuming any
+   * events generated by or supplied to these operations.
+   *
+   * <p>A closed {@link EventQueueCollection} may be {@linkplain
+   * #start(Consumer) started} again.</p>
+   *
+   * @see #start(Consumer)
+   */
+  @Override
   public final void close() {
     final Thread consumerThread;
     synchronized (this) {
@@ -511,6 +696,9 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
       returnValue = iterator.next();
       assert returnValue != null;
       iterator.remove();
+      if (this.initialPopulationCount > 0) {
+        this.initialPopulationCount--;
+      }
       Thread.interrupted(); // clear any interrupted status now that we know we're going to be successful
     }
     return returnValue;
@@ -558,7 +746,7 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
         }
       }
       synchronized (eventQueue) {
-        if (eventQueue.add(event)) {
+        if (eventQueue.addEvent(event)) {
           returnValue = event;
         }
         if (eventQueue.isEmpty()) {

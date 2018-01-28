@@ -48,10 +48,24 @@ import io.fabric8.kubernetes.api.model.ListMeta;
 import org.microbean.development.annotation.NonBlocking;
 
 /**
- * 
+ * A pump of sorts that continuously "pulls" logical events out of
+ * Kubernetes and {@linkplain EventCache#add(Object, Event.Type,
+ * HasMetadata) adds them} to an {@link EventCache} so as to logically
+ * "reflect" the contents of Kubernetes into the cache.
+ *
+ * @author <a href="https://about.me/lairdnelson"
+ * target="_parent">Laird Nelson</a>
+ *
+ * @see EventCache
  */
 public class Reflector<T extends HasMetadata> implements Closeable {
 
+
+  /*
+   * Instance fields.
+   */
+
+  
   private final Object operation;
 
   private volatile Object lastSynchronizationResourceVersion;
@@ -68,6 +82,12 @@ public class Reflector<T extends HasMetadata> implements Closeable {
 
   private final EventCache<T> eventCache;
 
+
+  /*
+   * Constructors.
+   */
+
+  
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
                                                                                                                               final EventCache<T> eventCache) {
@@ -105,6 +125,12 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       this.shutdownSynchronizationExecutorServiceOnClose = false;
     }
   }
+
+
+  /*
+   * Instance methods.
+   */
+  
 
   @Override
   public synchronized final void close() throws IOException {

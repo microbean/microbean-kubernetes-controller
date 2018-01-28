@@ -16,6 +16,7 @@
  */
 package org.microbean.kubernetes.controller;
 
+import java.util.AbstractCollection;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -28,31 +29,163 @@ import java.util.function.Consumer;
 
 import io.fabric8.kubernetes.api.model.HasMetadata;
 
-public class EventQueue<T extends HasMetadata> implements Iterable<Event<T>> {
+/**
+ * A publicly-unmodifiable {@link AbstractCollection} of {@link
+ * Event}s produced by an {@link EventQueueCollection}.
+ *
+ * <p>All {@link Event}s in an {@link EventQueue} describe the life of
+ * a single {@linkplain HasMetadata resource} in Kubernetes.</p>
+ *
+ * <h2>Thread Safety</h2>
+ *
+ * <p>This class is safe for concurrent use by multiple {@link
+ * Thread}s.  Some operations, like the usage of the {@link
+ * #iterator()} method, require that callers synchronize on the {@link
+ * EventQueue} directly.  This class' internals synchronize on {@code
+ * this} when locking is needed.</p>
+ *
+ * <p>Overrides of this class must also be safe for concurrent use by
+ * multiple {@link Thread}s.</p>
+ *
+ * @param <T> the type of a Kubernetes resource
+ *
+ * @author <a href="https://about.me/lairdnelson"
+ * target="_parent">Laird Nelson</a>
+ *
+ * @see EventQueueCollection
+ */
+public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<T>> {
 
+  
+  /*
+   * Instance fields.
+   */
+
+
+  /**
+   * The key identifying the Kubernetes resource to which all of the
+   * {@link Event}s managed by this {@link EventQueue} apply.
+   *
+   * <p>This field is never {@code null}.</p>
+   */
   private final Object key;
 
+  /**
+   * The actual underlying queue of {@link Event}s.
+   *
+   * <p>This field is never {@code null}.</p>
+   */
   private final LinkedList<Event<T>> events;
 
+
+  /*
+   * Constructors.
+   */
+
+
+  /**
+   * Creates a new {@link EventQueue}.
+   *
+   * @param key the key identifying the Kubernetes resource to which
+   * all of the {@link Event}s managed by this {@link EventQueue}
+   * apply; must not be {@code null}
+   *
+   * @exception NullPointerException if {@code key} is {@code null}
+   */
   protected EventQueue(final Object key) {
     super();
     this.key = Objects.requireNonNull(key);
     this.events = new LinkedList<>();
   }
 
+
+  /*
+   * Instance methods.
+   */
+
+
+  /**
+   * Returns the key identifying the Kubernetes resource to which all
+   * of the {@link Event}s managed by this {@link EventQueue} apply.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * @see #EventQueue(Object)
+   */
   public final Object getKey() {
     return this.key;
   }
 
+  /**
+   * Returns {@code true} if this {@link EventQueue} is empty.
+   *
+   * @return {@code true} if this {@link EventQueue} is empty; {@code
+   * false} otherwise
+   *
+   * @see #size()
+   */
   public synchronized final boolean isEmpty() {
     return this.events.isEmpty();
   }
-  
+
+  /**
+   * Returns the size of this {@link EventQueue}.
+   *
+   * <p>This method never returns an {@code int} less than {@code
+   * 0}.</p>
+   *
+   * @return the size of this {@link EventQueue}; never negative
+   *
+   * @see #isEmpty()
+   */
+  @Override
   public synchronized final int size() {
     return this.events.size();
   }
 
-  final boolean add(final Event<T> event) {    
+  /**
+   * Adds the supplied {@link Event} to this {@link EventQueue} under
+   * certain conditions.
+   *
+   * <p>The supplied {@link Event} is added to this {@link EventQueue}
+   * if:</p>
+   *
+   * <ul>
+   *
+   * <li>its {@linkplain Event#getKey() key} is equal to this {@link
+   * EventQueue}'s {@linkplain #getKey() key}</li>
+   *
+   * <li>it is either not a {@linkplain Event.Type#SYNCHRONIZATION
+   * synchronization event}, or it <em>is</em> a {@linkplain
+   * Event.Type#SYNCHRONIZATION synchronization event} and this {@link
+   * EventQueue} does not represent a sequence of events that
+   * {@linkplain #resultsInDeletion() describes a deletion}, and</li>
+   *
+   * <li>optional {@linkplain #compress(Collection) compression} does
+   * not result in this {@link EventQueue} being empty</li>
+   *
+   * </ul>
+   *
+   * @param event the {@link Event} to add; must not be {@code null}
+   *
+   * @return {@code true} if an addition took place and {@linkplain
+   * #compress(Collection) optional compression} did not result in
+   * this {@link EventQueue} {@linkplain #isEmpty() becoming empty};
+   * {@code false} otherwise
+   *
+   * @exception NullPointerException if {@code event} is {@code null}
+   *
+   * @exception IllegalArgumentException if {@code event}'s
+   * {@linkplain Event#getKey() key} is not equal to this {@link
+   * EventQueue}'s {@linkplain #getKey() key}
+   *
+   * @see #compress(Collection)
+   *
+   * @see Event.Type#SYNCHRONIZATION
+   *
+   * @see #resultsInDeletion()
+   */
+  final boolean addEvent(final Event<T> event) {
     Objects.requireNonNull(event);
     final Object key = this.getKey();
     if (!key.equals(event.getKey())) {
@@ -61,8 +194,8 @@ public class EventQueue<T extends HasMetadata> implements Iterable<Event<T>> {
     boolean returnValue = false;
     final Event.Type eventType = event.getType();
     assert eventType != null;
-    if (!eventType.equals(Event.Type.SYNCHRONIZATION) || !this.getResultsInDeletion()) {
-      synchronized (this) {
+    synchronized (this) {
+      if (!eventType.equals(Event.Type.SYNCHRONIZATION) || !this.resultsInDeletion()) {
         returnValue = this.events.add(event);
         if (returnValue) {
           this.deduplicate();
@@ -81,34 +214,77 @@ public class EventQueue<T extends HasMetadata> implements Iterable<Event<T>> {
     return returnValue;
   }
 
-  public synchronized final Event<T> get(final int index) {
-    return this.events.get(index);
-  }
-
-  public synchronized final Event<T> getLast() {
+  /**
+   * Returns the last (and definitionally newest) {@link Event} in
+   * this {@link EventQueue}.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * @return the last {@link Event} in this {@link EventQueue}; never
+   * {@code null}
+   *
+   * @exception NoSuchElementException if this {@link EventQueue} is
+   * {@linkplain #isEmpty() empty}
+   */
+  synchronized final Event<T> getLast() {
     return this.events.getLast();
   }
 
-  private synchronized final Event<T> remove() {
-    return this.events.remove();
-  }
-
+  /**
+   * Synchronizes on this {@link EventQueue} and, while holding its
+   * monitor, invokes the {@link Consumer#accept(Object)} method on
+   * the supplied {@link Consumer} for every {@link Event} in this
+   * {@link EventQueue}.
+   *
+   * @param action the {@link Consumer} in question; must not be
+   * {@code null}
+   *
+   * @exception NullPointerException if {@code action} is {@code null}
+   */
   @Override
   public synchronized final void forEach(final Consumer<? super Event<T>> action) {
-    Iterable.super.forEach(action);
+    super.forEach(action);
   }
   
+  /**
+   * Synchronizes on this {@link EventQueue} and, while holding its
+   * monitor, returns an unmodifiable {@link Iterator} over its
+   * contents.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * @return a non-{@code null} unmodifiable {@link Iterator} of
+   * {@link Event}s
+   */
   @Override
   public synchronized final Iterator<Event<T>> iterator() {
     return Collections.unmodifiableCollection(this.events).iterator();
   }
 
-  private final void deduplicate() {
+  /**
+   * If this {@link EventQueue}'s {@linkplain #size() size} is greater
+   * than {@code 2}, and if its last two {@link Event}s are
+   * {@linkplain Event.Type.DELETION deletions}, and if the
+   * next-to-last deletion {@link Event}'s {@linkplain
+   * Event#isFinalStateKnown() state is known}, then this method
+   * causes that {@link Event} to replace the two under consideration.
+   *
+   * <p>This method is called only by the {@link #addEvent(Event)}
+   * method.</p>
+   *
+   * @see #addEvent(Event)
+   */
+  private synchronized final void deduplicate() {
     final int size = this.size();
     if (size > 2) {
       final Event<T> lastEvent = this.events.get(size - 1);
       final Event<T> nextToLastEvent = this.events.get(size - 2);
-      final Event<T> event = arbitrateDuplicates(lastEvent, nextToLastEvent);
+      final Event<T> event;
+      if (lastEvent != null && nextToLastEvent != null && Event.Type.DELETION.equals(lastEvent.getType()) && Event.Type.DELETION.equals(nextToLastEvent.getType())) {
+        event = nextToLastEvent.isFinalStateKnown() ? nextToLastEvent : lastEvent;
+      } else {
+        event = null;
+      }
       if (event != null) {
         this.events.set(size - 2, event);
         this.events.remove(size - 1);
@@ -116,28 +292,62 @@ public class EventQueue<T extends HasMetadata> implements Iterable<Event<T>> {
     }
   }
 
-  private static final <X extends HasMetadata> Event<X> arbitrateDuplicates(final Event<X> a, final Event<X> b) {    
-    final Event<X> returnValue;
-    if (a != null && b != null && Event.Type.DELETION.equals(a.getType()) && Event.Type.DELETION.equals(b.getType())) {
-      if (b.isFinalStateKnown()) {
-        returnValue = b;
-      } else {
-        returnValue = a;
-      }
-    } else {
-      returnValue = null;
-    }
-    return returnValue;
-  }
-
-  synchronized final boolean getResultsInDeletion() {
+  /**
+   * Returns {@code true} if this {@link EventQueue} is {@linkplain
+   * #isEmpty() not empty} and the {@linkplain #getLast() last
+   * <code>Event</code> in this <code>EventQueue</code>} is a
+   * {@linkplain Event.Type.DELETION deletion event}.
+   *
+   * @return {@code true} if this {@link EventQueue} currently
+   * logically represents the deletion of a resource, {@code false}
+   * otherwise
+   */
+  synchronized final boolean resultsInDeletion() {
     return !this.isEmpty() && this.getLast().getType().equals(Event.Type.DELETION);
   }
-  
+
+  /**
+   * Performs a compression operation on the supplied {@link
+   * Collection} of {@link Event}s and returns the result of that
+   * operation.
+   *
+   * <p>This method may return {@code null}, which will result in the
+   * emptying of this {@link EventQueue}.</p>
+   *
+   * <p>This method is called while holding this {@link EventQueue}'s
+   * monitor.</p>
+   *
+   * <p>This method is called when an {@link EventQueueCollection} (or
+   * some other {@link Event} producer with access to
+   * package-protected methods of this class) adds an {@link Event} to
+   * this {@link EventQueue} and provides the {@link EventQueue}
+   * implementation with the ability to eliminate duplicates or
+   * otherwise compress the event stream it represents.</p>
+   *
+   * <p>This implementation simply returns the supplied {@code events}
+   * {@link Collection}; i.e. no compression is performed.</p>
+   *
+   * @param events an {@link
+   * Collections#unmodifiableCollection(Collection) unmodifiable
+   * <code>Collection</code>} of {@link Event}s representing the
+   * current state of this {@link EventQueue}; will never be {@code
+   * null}
+   *
+   * @return the new state that this {@link EventQueue} should assume;
+   * may be {@code null}; may simply be the supplied {@code events}
+   * {@link Collection} if compression is not desired or implemented
+   */
   protected Collection<Event<T>> compress(final Collection<Event<T>> events) {
     return events;
   }
 
+  /**
+   * Returns a hashcode for this {@link EventQueue}.
+   *
+   * @return a hashcode for this {@link EventQueue}
+   *
+   * @see #equals(Object)
+   */
   @Override
   public final int hashCode() {
     int hashCode = 17;
@@ -146,13 +356,28 @@ public class EventQueue<T extends HasMetadata> implements Iterable<Event<T>> {
     int c = value == null ? 0 : value.hashCode();
     hashCode = 37 * hashCode + c;
 
-    value = this.events;
-    c = value == null ? 0 : value.hashCode();
-    hashCode = 37 * hashCode + c;
+    synchronized (this) {
+      value = this.events;
+      c = value == null ? 0 : value.hashCode();
+      hashCode = 37 * hashCode + c;
+    }
 
     return hashCode;
   }
 
+  /**
+   * Returns {@code true} if the supplied {@link Object} is also an
+   * {@link EventQueue} and is equal in all respects to this one.
+   *
+   * @param other the {@link Object} to test; may be {@code null} in
+   * which case {@code null} will be returned
+   *
+   * @return {@code true} if the supplied {@link Object} is also an
+   * {@link EventQueue} and is equal in all respects to this one;
+   * {@code false} otherwise
+   *
+   * @see #hashCode()
+   */
   @Override
   public final boolean equals(final Object other) {
     if (other == this) {
@@ -169,13 +394,21 @@ public class EventQueue<T extends HasMetadata> implements Iterable<Event<T>> {
         return false;
       }
 
-      final Object events = this.events;
-      if (events == null) {
-        if (her.events != null) {
-          return false;
+      synchronized (this) {
+        final Object events = this.events;
+        if (events == null) {
+          synchronized (her) {
+            if (her.events != null) {
+              return false;
+            }
+          }
+        } else {
+          synchronized (her) {
+            if (!events.equals(her.events)) {
+              return false;
+            }
+          }
         }
-      } else if (!events.equals(her.events)) {
-        return false;
       }
 
       return true;
@@ -184,6 +417,15 @@ public class EventQueue<T extends HasMetadata> implements Iterable<Event<T>> {
     }
   }
 
+  /**
+   * Returns a {@link String} representation of this {@link
+   * EventQueue}.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * @return a non-{@code null} {@link String} representation of this
+   * {@link EventQueue}
+   */
   @Override
   public synchronized final String toString() {
     return new StringBuilder().append(this.getKey()).append(": ").append(this.events).toString();
