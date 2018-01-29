@@ -53,26 +53,31 @@ import static org.junit.Assume.assumeFalse;
 
 import io.fabric8.kubernetes.client.Watcher;
 
-@Deprecated
 public class TestReflectorBasics {
 
   public TestReflectorBasics() {
     super();
   }
 
-  // @Ignore
   @Test
   public void testBasics() throws Exception {
     assumeFalse(Boolean.getBoolean("skipClusterTests"));
 
-    final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(2);
+    final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(1);
     assertNotNull(executorService);
 
     final DefaultKubernetesClient client = new DefaultKubernetesClient();
 
+    // We'll use this as our "known objects".
     final Map<Object, ConfigMap> configMaps = new HashMap<>();
+
+    // Create a new EventCache implementation that "knows about" our
+    // known objects.
     final EventQueueCollection<ConfigMap> eventQueues = new EventQueueCollection<>(configMaps, 16, 0.75f);
-    
+
+    // Create a consumer that can remove and process EventQueues from
+    // our EventCache implementation.  It will also update our "known
+    // objects".
     final Consumer<? super EventQueue<? extends ConfigMap>> siphon = (q) -> {
       assertNotNull(q);
       assertFalse(q.isEmpty());
@@ -92,33 +97,42 @@ public class TestReflectorBasics {
       }
     };
 
-    // Begin sucking EventQueue instances out of the cache.  Obviously
-    // there aren't any yet.  This creates a new (daemon) Thread and
-    // starts it.
+    // Begin sucking EventQueue instances out of the cache on a
+    // separate Thread.  Obviously there aren't any yet.  This creates
+    // a new (daemon) Thread and starts it.  It will block
+    // immediately, waiting for new EventQueues to show up in our
+    // EventQueueCollection.
     eventQueues.start(siphon);
 
+    // Now create a Reflector that we'll then hook up to Kubernetes
+    // and instruct to "reflect" its events "into" our
+    // EventQueueCollection, thus making EventQueues available to the
+    // Consumer we built above.
     final Reflector<ConfigMap> reflector =
       new Reflector<ConfigMap>(client.configMaps(),
                                eventQueues,
                                executorService,
                                Duration.ofSeconds(10));
 
-    // Begin effectively putting EventQueue instances into the cache.
-    // This creates a new (daemon) Thread and starts it.
+    // Start the reflection process: this effectively puts EventQueue
+    // instances into the cache.  This creates a new (daemon) Thread
+    // and starts it.
     reflector.start();
-    
+
+    // Sleep for a bit on the main thread so you can see what's going
+    // on and try adding some resources to Kubernetes in a terminal
+    // window.  Watch as the consumer we built above will report on
+    // all the additions, updates, deletions and synchronizations.
     Thread.sleep(1L * 60L * 1000L);
 
-    // Shut down production of events.
+    // Shut down production of events (notably before we shut down
+    // consumption of events).
     reflector.close();
     client.close();
 
-    // Shut down reception of events.
+    // Shut down reception of events (notably after we shut down
+    // production).
     eventQueues.close();
-  }
-
-  public static final void main(final String[] args) throws Exception {
-    new TestReflectorBasics().testBasics();
   }
 
 }

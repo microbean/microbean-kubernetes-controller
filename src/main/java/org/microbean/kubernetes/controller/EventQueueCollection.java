@@ -663,9 +663,8 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
           synchronized (eventQueue) {
             try {
               siphon.accept(eventQueue);
-            } catch (final RuntimeException runtimeException) {
-              // TODO: catch a subclass that indicates a requeue request;
-              throw runtimeException;
+            } catch (final TransientException transientException) {
+              this.map.putIfAbsent(eventQueue.getKey(), eventQueue);
             }
           }
         }
@@ -704,18 +703,106 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
     return returnValue;
   }
 
+  /**
+   * Creates an {@link Event} using the supplied raw materials and
+   * returns it.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>Implementations of this method must not return {@code
+   * null}.</p>
+   *
+   * <p>Implementations of this method must return a new {@link Event}
+   * with every invocation.</p>
+   *
+   * @param source the {@linkplain Event#getSource() source} of the
+   * {@link Event} that will be created; must not be null
+   *
+   * @param eventType the {@linkplain Event#getType() type} of {@link
+   * Event} that will be created; must not be {@code null}
+   *
+   * @param resource the {@linkplain Event#getResource() resource} of
+   * the {@link Event} that will be created; must not be
+   * {@code null}
+   */
   protected Event<T> createEvent(final Object source, final Event.Type eventType, final T resource) {
     Objects.requireNonNull(source);
     Objects.requireNonNull(eventType);
     Objects.requireNonNull(resource);
-    return new Event<>(source, eventType, resource);
+    return new Event<T>(source, eventType, null, resource);
   }
-  
+
+  /**
+   * Adds a new {@link Event} constructed out of the parameters
+   * supplied to this method to this {@link EventQueueCollection} and
+   * returns the {@link Event} that was added.
+   *
+   * <p>This method may return {@code null}.</p>
+   *
+   * <p>This implementation {@linkplain #createEventQueue(Object)
+   * creates an <code>EventQueue</code>} if necessary for the {@link
+   * Event} that will be added, and then adds the new {@link Event} to
+   * the queue.</p>
+   *
+   * @param source the {@linkplain Event#getSource() source} of the
+   * {@link Event} that will be created and added; must not be null
+   *
+   * @param eventType the {@linkplain Event#getType() type} of {@link
+   * Event} that will be created and added; must not be {@code null}
+   *
+   * @param resource the {@linkplain Event#getResource() resource} of
+   * the {@link Event} that will be created and added; must not be
+   * {@code null}
+   *
+   * @return the {@link Event} that was created and added, or {@code
+   * null} if no {@link Event} was actually added as a result of this
+   * method's invocation
+   *
+   * @exception NullPointerException if any of the parameters is
+   * {@code null}
+   *
+   * @see Event
+   */
   @Override
   public final Event<T> add(final Object source, final Event.Type eventType, final T resource) {
     return this.add(source, eventType, resource, true);
   }
 
+  /**
+   * Adds a new {@link Event} constructed out of the parameters
+   * supplied to this method to this {@link EventQueueCollection} and
+   * returns the {@link Event} that was added.
+   *
+   * <p>This method may return {@code null}.</p>
+   *
+   * <p>This implementation {@linkplain #createEventQueue(Object)
+   * creates an <code>EventQueue</code>} if necessary for the {@link
+   * Event} that will be added, and then adds the new {@link Event} to
+   * the queue.</p>
+   *
+   * @param source the {@linkplain Event#getSource() source} of the
+   * {@link Event} that will be created and added; must not be null
+   *
+   * @param eventType the {@linkplain Event#getType() type} of {@link
+   * Event} that will be created and added; must not be {@code null}
+   *
+   * @param resource the {@linkplain Event#getResource() resource} of
+   * the {@link Event} that will be created and added; must not be
+   * {@code null}
+   *
+   * @param populate if {@link true} then this {@link
+   * EventQueueCollection} will be internally marked as <em>initially
+   * populated</em>
+   *
+   * @return the {@link Event} that was created and added, or {@code
+   * null} if no {@link Event} was actually added as a result of this
+   * method's invocation
+   *
+   * @exception NullPointerException if any of the parameters is
+   * {@code null}
+   *
+   * @see Event
+   */
   private final Event<T> add(final Object source, final Event.Type eventType, final T resource, final boolean populate) {
     final Event<T> event = this.createEvent(source, eventType, resource);
     if (event == null) {
@@ -724,6 +811,33 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
     return this.add(event, populate);
   }
 
+  /**
+   * Adds the supplied {@link Event} to this {@link
+   * EventQueueCollection} and returns the {@link Event} that was
+   * added.
+   *
+   * <p>This method may return {@code null}.</p>
+   *
+   * <p>This implementation {@linkplain #createEventQueue(Object)
+   * creates an <code>EventQueue</code>} if necessary for the {@link
+   * Event} that will be added, and then adds the new {@link Event} to
+   * the queue.</p>
+   *
+   * @param event the {@link Event} to add; must not be {@code null}
+   *
+   * @param populate if {@link true} then this {@link
+   * EventQueueCollection} will be internally marked as <em>initially
+   * populated</em>
+   *
+   * @return the {@link Event} that was created and added, or {@code
+   * null} if no {@link Event} was actually added as a result of this
+   * method's invocation
+   *
+   * @exception NullPointerException if any of the parameters is
+   * {@code null}
+   *
+   * @see Event
+   */
   private final Event<T> add(final Event<T> event, final boolean populate) {
     Objects.requireNonNull(event);
     final Object key = event.getKey();
@@ -763,6 +877,87 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
       this.notifyAll();
     }
     return returnValue;
+  }
+
+
+  /*
+   * Inner and nested classes.
+   */
+  
+
+  /**
+   * A {@link RuntimeException} indicating that a {@link Consumer}
+   * {@linkplain EventQueueCollection#start(Consumer) started} by an
+   * {@link EventQueueCollection} has encountered an error that might
+   * not happen if the consumption operation is retried.
+   *
+   * @author <a href="https://about.me/lairdnelson"
+   * target="_parent">Laird Nelson</a>
+   *
+   * @see EventQueueCollection
+   */
+  public static final class TransientException extends RuntimeException {
+
+
+    /*
+     * Static fields.
+     */
+
+
+    /**
+     * The version of this class for {@linkplain Serializable
+     * serialization purposes}.
+     *
+     * @see Serializable
+     */
+    private static final long serialVersionUID = 1L;
+
+
+    /*
+     * Constructors.
+     */
+
+
+    /**
+     * Creates a new {@link TransientException}.
+     */
+    public TransientException() {
+      super();
+    }
+
+    /**
+     * Creates a new {@link TransientException}.
+     *
+     * @param message a detail message describing the error; may be
+     * {@code null}
+     */
+    public TransientException(final String message) {
+      super(message);
+    }
+
+    /**
+     * Creates a new {@link TransientException}.
+     *
+     * @param cause the {@link Throwable} that caused this {@link
+     * TransientException} to be created; may be {@code null}
+     */
+    public TransientException(final Throwable cause) {
+      super(cause);
+    }
+
+    /**
+     * Creates a new {@link TransientException}.
+     *
+     * @param message a detail message describing the error; may be
+     * {@code null}
+     *
+     * @param cause the {@link Throwable} that caused this {@link
+     * TransientException} to be created; may be {@code null}
+     */
+    public TransientException(final String message, final Throwable cause) {
+      super(message, cause);
+    }
+    
   }
 
 }

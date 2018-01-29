@@ -40,6 +40,13 @@
       </dependency>
 
       <dependency>
+        <groupId>net.jcip</groupId>
+        <artifactId>jcip-annotations</artifactId>
+        <version>1.0</version>
+        <type>jar</type>
+      </dependency>
+
+      <dependency>
         <groupId>org.microbean</groupId>
         <artifactId>microbean-development-annotations</artifactId>
         <version>0.1.3-SNAPSHOT</version>
@@ -70,6 +77,13 @@
     <dependency>
       <groupId>io.fabric8</groupId>
       <artifactId>kubernetes-client</artifactId>
+      <type>jar</type>
+      <scope>compile</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>net.jcip</groupId>
+      <artifactId>jcip-annotations</artifactId>
       <type>jar</type>
       <scope>compile</scope>
     </dependency>
@@ -205,7 +219,7 @@
 
     <!-- maven-javadoc-plugin properties; see https://maven.apache.org/plugins/maven-javadoc-plugin/javadoc-mojo.html -->
     <doctitle>&lt;a href="${project.url}" target="_parent"&gt;${project.artifactId}&lt;/a&gt; ${project.version} &lt;a href="https://travis-ci.org/microbean/${project.artifactId}" target="_parent"&gt;&lt;img src="https://travis-ci.org/microbean/${project.artifactId}.svg?branch=master"&gt;&lt;/a&gt;</doctitle>
-    <links>https://microbean.github.io/microbean-kubernetes/apidocs/,https://microbean.github.io/microbean-development-annotations/apidocs/</links>
+    <links>https://microbean.github.io/microbean-kubernetes/apidocs/,https://microbean.github.io/microbean-development-annotations/apidocs/,http://jcip.net/annotations/doc/</links>
     
     <!-- maven-release-plugin properties; see http://maven.apache.org/maven-release/maven-release-plugin/perform-mojo.html -->
     <goals>deploy,site-deploy</goals>

@@ -81,6 +81,20 @@ public class Event<T extends HasMetadata> extends EventObject {
   private final Type type;
 
   /**
+   * A Kubernetes resource representing the <em>prior</em> state of
+   * the resource returned by this {@link Event}'s {@link
+   * #getResource()} method.
+   *
+   * <p>This field may be {@code null}.</p>
+   *
+   * <p>The prior state of a given Kubernetes resource is often not
+   * known, so this field is often {@code null}.</p>
+   *
+   * @see #getResource()
+   */
+  private final T priorResource;
+  
+  /**
    * A Kubernetes resource representing its state at the time of this
    * event.
    *
@@ -104,6 +118,11 @@ public class Event<T extends HasMetadata> extends EventObject {
    * @param type the {@link Type} of this {@link Event}; must not be
    * {@code null}
    *
+   * @param priorResource a {@link HasMetadata} representing the
+   * <em>prior state</em> of the {@linkplain #getResource() Kubernetes
+   * resource this <code>Event</code> primarily concerns}; may
+   * be&mdash;<strong>and often is</strong>&mdash;null
+   *
    * @param resource a {@link HasMetadata} representing a Kubernetes
    * resource; must not be {@code null}
    *
@@ -111,9 +130,10 @@ public class Event<T extends HasMetadata> extends EventObject {
    *
    * @see EventObject#getSource()
    */
-  protected Event(final Object source, final Type type, final T resource) {
+  protected Event(final Object source, final Type type, final T priorResource, final T resource) {
     super(source);
     this.type = Objects.requireNonNull(type);
+    this.priorResource = priorResource;
     this.resource = Objects.requireNonNull(resource);
   }
 
@@ -135,6 +155,27 @@ public class Event<T extends HasMetadata> extends EventObject {
    */
   public final Type getType() {
     return this.type;
+  }
+
+  /**
+   * Returns a {@link HasMetadata} representing the <em>prior
+   * state</em> of the Kubernetes resource this {@link Event}
+   * primarily concerns.
+   *
+   * <p>This method may return {@code null}, and often does.</p>
+   *
+   * <p>The prior state of a Kubernetes resource is often not known at
+   * {@link Event} construction time so it is common for this method
+   * to return {@code null}.
+   *
+   * @return a {@link HasMetadata} representing the <em>prior
+   * state</em> of the {@linkplain #getResource() Kubernetes resource
+   * this <code>Event</code> primarily concerns}, or {@code null}
+   *
+   * @see #getResource()
+   */
+  public final T getPriorResource() {
+    return this.priorResource;
   }
 
   /**
@@ -228,6 +269,10 @@ public class Event<T extends HasMetadata> extends EventObject {
     final Object resource = this.getResource();
     c = resource == null ? 0 : resource.hashCode();
     hashCode = hashCode * 17 + c;
+
+    final Object priorResource = this.getPriorResource();
+    c = priorResource == null ? 0 : priorResource.hashCode();
+    hashCode = hashCode * 17 + c;
     
     return hashCode;
   }
@@ -287,6 +332,16 @@ public class Event<T extends HasMetadata> extends EventObject {
         return false;
       }
 
+      final Object priorResource = this.getPriorResource();
+      if (priorResource == null) {
+        if (her.getPriorResource() != null) {
+          return false;
+        }
+      } else if (!priorResource.equals(her.getPriorResource())) {
+        return false;
+      }
+
+      
       return true;
     } else {
       return false;
@@ -305,7 +360,13 @@ public class Event<T extends HasMetadata> extends EventObject {
    */
   @Override
   public String toString() {
-    return new StringBuilder().append(this.getType()).append(": ").append(this.getResource()).toString();
+    final StringBuilder sb = new StringBuilder().append(this.getType()).append(": ");
+    final Object priorResource = this.getPriorResource();
+    if (priorResource != null) {
+      sb.append(priorResource).append(" --> ");
+    }
+    sb.append(this.getResource());
+    return sb.toString();
   }
 
 
