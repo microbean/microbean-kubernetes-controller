@@ -46,6 +46,9 @@ import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
 import io.fabric8.kubernetes.api.model.ListMeta;
 
+import net.jcip.annotations.GuardedBy;
+import net.jcip.annotations.ThreadSafe;
+
 import org.microbean.development.annotation.NonBlocking;
 
 /**
@@ -66,6 +69,7 @@ import org.microbean.development.annotation.NonBlocking;
  *
  * @see EventCache
  */
+@ThreadSafe
 public class Reflector<T extends HasMetadata> implements Closeable {
 
 
@@ -98,14 +102,17 @@ public class Reflector<T extends HasMetadata> implements Closeable {
 
   private final ScheduledExecutorService synchronizationExecutorService;
 
+  @GuardedBy("this")
   private ScheduledFuture<?> synchronizationTask;
 
   private final boolean shutdownSynchronizationExecutorServiceOnClose;
 
   private final Duration synchronizationInterval;
 
+  @GuardedBy("this")
   private Closeable watch;
 
+  @GuardedBy("itself")
   private final EventCache<T> eventCache;
 
 

@@ -77,7 +77,8 @@ public interface EventCache<T extends HasMetadata> {
    * of resources.
    *
    * @param incomingResources the resources comprising the new state;
-   * must not be {@code null}
+   * must not be {@code null}; <strong>must be synchronized
+   * on</strong> when accessing
    *
    * @param resourceVersion the notional version of the supplied
    * {@link Collection}; may be {@code null}; often ignored by

@@ -29,6 +29,9 @@ import java.util.function.Consumer;
 
 import io.fabric8.kubernetes.api.model.HasMetadata;
 
+import net.jcip.annotations.GuardedBy;
+import net.jcip.annotations.ThreadSafe;
+
 /**
  * A publicly-unmodifiable {@link AbstractCollection} of {@link
  * Event}s produced by an {@link EventQueueCollection}.
@@ -54,6 +57,7 @@ import io.fabric8.kubernetes.api.model.HasMetadata;
  *
  * @see EventQueueCollection
  */
+@ThreadSafe
 public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<T>> {
 
   
@@ -75,6 +79,7 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    *
    * <p>This field is never {@code null}.</p>
    */
+  @GuardedBy("this")
   private final LinkedList<Event<T>> events;
 
 

@@ -33,6 +33,9 @@ import java.util.function.Consumer;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 
+import net.jcip.annotations.GuardedBy;
+import net.jcip.annotations.ThreadSafe;
+
 import org.microbean.development.annotation.Blocking;
 import org.microbean.development.annotation.NonBlocking;
 
@@ -65,6 +68,7 @@ import org.microbean.development.annotation.NonBlocking;
  *
  * @see EventQueue
  */
+@ThreadSafe
 public final class EventQueueCollection<T extends HasMetadata> implements EventCache<T>, Iterable<EventQueue<T>>, AutoCloseable {
 
 
@@ -91,6 +95,7 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
    *
    * @see #replace(Collection, Object)
    */
+  @GuardedBy("this")
   private boolean populated;
 
   /**
@@ -103,6 +108,7 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
    *
    * @see #replace(Collection, Object)
    */
+  @GuardedBy("this")
   private int initialPopulationCount;
 
   /**
@@ -118,6 +124,7 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
    *
    * @see #attach(Consumer)
    */
+  @GuardedBy("this")
   private Thread consumerThread;
 
   /**
@@ -131,6 +138,7 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
    *
    * @see #add(Object, Event.Type, Resource)
    */
+  @GuardedBy("this")
   private final LinkedHashMap<Object, EventQueue<T>> map;
 
   /**
@@ -148,6 +156,7 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
    *
    * @see #synchronize()
    */
+  @GuardedBy("itself")
   private final Map<?, ? extends T> knownObjects;
 
 
