@@ -126,6 +126,9 @@ public class Event<T extends HasMetadata> extends EventObject {
    * @param resource a {@link HasMetadata} representing a Kubernetes
    * resource; must not be {@code null}
    *
+   * @exception NullPointerException if {@code source}, {@code type}
+   * or {@code resource} is {@code null}
+   *
    * @see Type
    *
    * @see EventObject#getSource()
@@ -195,6 +198,10 @@ public class Event<T extends HasMetadata> extends EventObject {
    * #getResource() resource} is an accurate representation of its
    * last known state.
    *
+   * <p>This should only return {@code true} for some, but not all,
+   * deletion scenarios.  Any other behavior should be considered to
+   * be an error.</p>
+   *
    * @return {@code true} if this {@link Event}'s {@linkplain
    * #getResource() resource} is an accurate representation of its
    * last known state; {@code false} otherwise
@@ -225,22 +232,17 @@ public class Event<T extends HasMetadata> extends EventObject {
    * <p>Overrides of this method must not return {@code null} except
    * in exceptional cases.</p>
    *
+   * <p>The default implementation of this method returns the return
+   * value of the {@link HasMetadatas#getKey(HasMetadata)} method.</p>
+   *
    * @return a key for this {@link Event}, or {@code null}
+   *
+   * @see HasMetadatas#getKey(HasMetadata) 
    */
   public Object getKey() {
     Object returnValue = this.key;
     if (returnValue == null) {
-      final T resource = this.getResource();
-      assert resource != null;
-      final ObjectMeta metadata = resource.getMetadata();
-      if (metadata != null) {
-        final String namespace = metadata.getNamespace();
-        if (namespace == null || namespace.isEmpty()) {
-          returnValue = metadata.getName();
-        } else {
-          returnValue = new StringBuilder(namespace).append("/").append(metadata.getName()).toString();
-        }
-      }
+      returnValue = HasMetadatas.getKey(this.getResource());
     }
     return returnValue;
   }

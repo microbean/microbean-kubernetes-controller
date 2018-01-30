@@ -69,7 +69,7 @@ import org.microbean.development.annotation.NonBlocking;
  * @see EventQueue
  */
 @ThreadSafe
-public final class EventQueueCollection<T extends HasMetadata> implements EventCache<T>, Iterable<EventQueue<T>>, AutoCloseable {
+public class EventQueueCollection<T extends HasMetadata> implements EventCache<T>, Iterable<EventQueue<T>>, AutoCloseable {
 
 
   /*
@@ -514,37 +514,20 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
    * <p>Overrides of this method may return {@code null}, but only if
    * {@code resource} is {@code null}.
    *
+   * <p>The default implementation of this method returns the return
+   * value of the {@link HasMetadatas#getKey(HasMetadata)} method.</p>
+   *
    * @param resource a {@link HasMetadata} for which a key should be
    * returned; may be {@code null} in which case {@code null} may be
    * returned
    *
    * @return a non-{@code null} key for the supplied {@code resource};
    * or {@code null} if {@code resource} is {@code null}
+   *
+   * @see HasMetadatas#getKey(HasMetadata)
    */
   protected Object getKey(final T resource) {
-    final Object returnValue;
-    if (resource == null) {
-      returnValue = null;
-    } else {
-      final ObjectMeta metadata = resource.getMetadata();
-      if (metadata == null) {
-        returnValue = null;
-      } else {
-        String name = metadata.getName();
-        if (name == null) {
-          throw new IllegalStateException("metadata.getName() == null");
-        } else if (name.isEmpty()) {
-          throw new IllegalStateException("metadata.getName().isEmpty()");
-        }
-        final String namespace = metadata.getNamespace();
-        if (namespace == null || namespace.isEmpty()) {
-          returnValue = name;
-        } else {
-          returnValue = new StringBuilder(namespace).append("/").append(name).toString();
-        }
-      }
-    }
-    return returnValue;
+    return HasMetadatas.getKey(resource);
   }
 
   /**
@@ -853,13 +836,13 @@ public final class EventQueueCollection<T extends HasMetadata> implements EventC
     if (key == null) {
       throw new IllegalArgumentException("event.getKey() == null");
     }
-    if (populate) {
-      this.populated = true;
-    }
     
     Event<T> returnValue = null;
     EventQueue<T> eventQueue;
     synchronized (this) {
+      if (populate) {
+        this.populated = true;
+      }
       eventQueue = this.map.get(key);
       final boolean eventQueueExisted = eventQueue != null;
       if (eventQueue == null) {

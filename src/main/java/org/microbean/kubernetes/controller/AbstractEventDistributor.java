@@ -27,42 +27,21 @@ import io.fabric8.kubernetes.api.model.HasMetadata;
 import net.jcip.annotations.GuardedBy;
 
 /**
- * An abstract {@link Consumer} of {@link EventQueue}s, particularly
- * suitable for supplying to the {@link
- * EventQueueCollection#start(Consumer)} method, whose implementations
- * can distribute {@link Event}s in some fashion.
+ * An abstract {@link ResourceTrackingEventQueueConsumer} whose
+ * implementations are particularly suitable for supplying to the
+ * {@link EventQueueCollection#start(Consumer)} method and can
+ * distribute {@link Event}s in some fashion.
  *
  * @author <a href="https://about.me/lairdnelson"
  * target="_parent">Laird Nelson</a>
+ *
+ * @see #fireEvent(Event)
  *
  * @see EventQueue
  *
  * @see EventQueueCollection#start(Consumer)
  */
-public abstract class AbstractEventDistributor<T extends HasMetadata> implements Consumer<EventQueue<T>> {
-
-
-  /*
-   * Instance fields.
-   */
-
-
-  /**
-   * A mutable {@link Map} of {@link HasMetadata} objects indexed by
-   * their keys (often a pairing of namespace and name).
-   *
-   * <p>This field is never {@code null}.</p>
-   *
-   * <p>The value of this field is {@linkplain
-   * #AbstractEventDistributor(Map) supplied at construction time} and
-   * is written to by the {@link #accept(EventQueue)} method.</p>
-   *
-   * <p>This {@link AbstractEventDistributor} implementation
-   * <strong>synchronizes on this field's value</strong> when mutating
-   * its contents.</p>
-   */
-  @GuardedBy("itself")
-  private final Map<Object, T> knownObjects;
+public abstract class AbstractEventDistributor<T extends HasMetadata> extends ResourceTrackingEventQueueConsumer<T> {
 
 
   /*
@@ -87,8 +66,7 @@ public abstract class AbstractEventDistributor<T extends HasMetadata> implements
    * @see #accept(EventQueue)
    */
   protected AbstractEventDistributor(final Map<Object, T> knownObjects) {
-    super();
-    this.knownObjects = Objects.requireNonNull(knownObjects);
+    super(knownObjects);
   }
 
 
@@ -98,69 +76,37 @@ public abstract class AbstractEventDistributor<T extends HasMetadata> implements
   
 
   /**
-   * Reads all {@link Event}s from the supplied {@link EventQueue} in
-   * order and creates and {@linkplain #fireEvent(Event) distributes}
-   * new {@link Event}s for them that incorporate appropriate
-   * {@linkplain Event#getPriorResource() prior resource state}
-   * derived from the {@link Map} of resources supplied at {@linkplain
-   * #AbstractEventDistributor(Map) construction time}.
+   * Implements the {@link
+   * ResourceTrackingEventQueueConsumer#accept(Event.Type,
+   * HasMetadata, HasMetadata)} method by creating an {@link Event}
+   * and calling the {@link #fireEvent(Event)} method with it.
    *
-   * @param eventQueue the {@link EventQueue} to read; may be {@code
-   * null} in which case no action will be taken; <strong>will be
-   * synchronized on</strong> by this method
+   * @param eventType the {@link Type} of the new {@link Event}; must
+   * not be {@code null}
    *
-   * @exception EventQueueCollection.TransientException if a transient
-   * error was encountered that might be cleared if the supplied
-   * {@code eventQueue} were requeued and consumed again later
+   * @param priorResource a {@link HasMetadata} representing the
+   * <em>prior state</em> of the {@linkplain Event#getResource() Kubernetes
+   * resource the new <code>Event</code> will primarily concern}; may
+   * be&mdash;<strong>and often is</strong>&mdash;null
    *
-   * @see #fireEvent(Event)
+   * @param resource a {@link HasMetadata} representing a Kubernetes
+   * resource; must not be {@code null}
+   *
+   * @exception NullPointerException if {@code eventType} or {@code
+   * resource} is {@code null}
    */
   @Override
-  public final void accept(final EventQueue<T> eventQueue) {
-    if (eventQueue != null) {
-      synchronized (eventQueue) {
-        final Object key = eventQueue.getKey();
-        if (key == null) {
-          throw new IllegalStateException("eventQueue.getKey() == null; eventQueue: " + eventQueue);
-        }
-        for (final Event<T> event : eventQueue) {
-          if (event != null) {
-            assert key.equals(event.getKey());
-            final Event.Type eventType = event.getType();
-            assert eventType != null;
-            final T newResource = event.getResource();
-            if (event.getPriorResource() != null) {
-              // TODO: unexpected state, but should just be ignored or
-              // logged
-            }
-            final T priorResource;
-            final Event.Type newEventType;
-            synchronized (this.knownObjects) {
-              priorResource = this.knownObjects.get(key);
-              if (eventType.equals(Event.Type.DELETION)) {
-                this.knownObjects.remove(key);
-                newEventType = Event.Type.DELETION;
-              } else {
-                assert eventType.equals(Event.Type.ADDITION) || eventType.equals(Event.Type.MODIFICATION) || eventType.equals(Event.Type.SYNCHRONIZATION);
-                this.knownObjects.put(key, event.getResource());
-                if (priorResource == null) {
-                  newEventType = Event.Type.ADDITION;
-                } else if (eventType.equals(Event.Type.SYNCHRONIZATION)) {
-                  newEventType = Event.Type.SYNCHRONIZATION;
-                } else {
-                  newEventType = Event.Type.MODIFICATION;
-                }
-              }
-            }
-            this.fireEvent(new Event<>(this, newEventType, priorResource, newResource));
-          }
-        }
-      }
-    }
+  protected void accept(final Event.Type eventType, final T priorResource, final T resource) {
+    Objects.requireNonNull(eventType);
+    this.fireEvent(new Event<T>(this, eventType, priorResource, resource));
   }
-
+  
   /**
    * Distributes the supplied {@link Event} in some way.
+   *
+   * <p>Implementations of this method should be relatively fast as
+   * this method dictates the speed of {@link EventQueue}
+   * processing.</p>
    *
    * @param event the {@link Event} to distribute; must not be {@code null}
    *
