@@ -85,28 +85,29 @@
 <span class="sourceLineNo">077</span>   * of resources.<a name="line.77"></a>
 <span class="sourceLineNo">078</span>   *<a name="line.78"></a>
 <span class="sourceLineNo">079</span>   * @param incomingResources the resources comprising the new state;<a name="line.79"></a>
-<span class="sourceLineNo">080</span>   * must not be {@code null}<a name="line.80"></a>
-<span class="sourceLineNo">081</span>   *<a name="line.81"></a>
-<span class="sourceLineNo">082</span>   * @param resourceVersion the notional version of the supplied<a name="line.82"></a>
-<span class="sourceLineNo">083</span>   * {@link Collection}; may be {@code null}; often ignored by<a name="line.83"></a>
-<span class="sourceLineNo">084</span>   * implementations<a name="line.84"></a>
-<span class="sourceLineNo">085</span>   *<a name="line.85"></a>
-<span class="sourceLineNo">086</span>   * @exception NullPointerException if {@code incomingResources} is<a name="line.86"></a>
-<span class="sourceLineNo">087</span>   * {@code null}<a name="line.87"></a>
-<span class="sourceLineNo">088</span>   */<a name="line.88"></a>
-<span class="sourceLineNo">089</span>  public void replace(final Collection&lt;? extends T&gt; incomingResources, final Object resourceVersion);<a name="line.89"></a>
-<span class="sourceLineNo">090</span><a name="line.90"></a>
-<span class="sourceLineNo">091</span>  /**<a name="line.91"></a>
-<span class="sourceLineNo">092</span>   * Synchronizes this {@link EventCache} implementation's state with<a name="line.92"></a>
-<span class="sourceLineNo">093</span>   * its downstream consumers, if any.<a name="line.93"></a>
-<span class="sourceLineNo">094</span>   *<a name="line.94"></a>
-<span class="sourceLineNo">095</span>   * &lt;p&gt;Not all {@link EventCache} implementations need support<a name="line.95"></a>
-<span class="sourceLineNo">096</span>   * synchronization.  An implementation of this method that does<a name="line.96"></a>
-<span class="sourceLineNo">097</span>   * nothing is explicitly permitted.&lt;/p&gt;<a name="line.97"></a>
-<span class="sourceLineNo">098</span>   */<a name="line.98"></a>
-<span class="sourceLineNo">099</span>  public void synchronize();<a name="line.99"></a>
-<span class="sourceLineNo">100</span>  <a name="line.100"></a>
-<span class="sourceLineNo">101</span>}<a name="line.101"></a>
+<span class="sourceLineNo">080</span>   * must not be {@code null}; &lt;strong&gt;must be synchronized<a name="line.80"></a>
+<span class="sourceLineNo">081</span>   * on&lt;/strong&gt; when accessing<a name="line.81"></a>
+<span class="sourceLineNo">082</span>   *<a name="line.82"></a>
+<span class="sourceLineNo">083</span>   * @param resourceVersion the notional version of the supplied<a name="line.83"></a>
+<span class="sourceLineNo">084</span>   * {@link Collection}; may be {@code null}; often ignored by<a name="line.84"></a>
+<span class="sourceLineNo">085</span>   * implementations<a name="line.85"></a>
+<span class="sourceLineNo">086</span>   *<a name="line.86"></a>
+<span class="sourceLineNo">087</span>   * @exception NullPointerException if {@code incomingResources} is<a name="line.87"></a>
+<span class="sourceLineNo">088</span>   * {@code null}<a name="line.88"></a>
+<span class="sourceLineNo">089</span>   */<a name="line.89"></a>
+<span class="sourceLineNo">090</span>  public void replace(final Collection&lt;? extends T&gt; incomingResources, final Object resourceVersion);<a name="line.90"></a>
+<span class="sourceLineNo">091</span><a name="line.91"></a>
+<span class="sourceLineNo">092</span>  /**<a name="line.92"></a>
+<span class="sourceLineNo">093</span>   * Synchronizes this {@link EventCache} implementation's state with<a name="line.93"></a>
+<span class="sourceLineNo">094</span>   * its downstream consumers, if any.<a name="line.94"></a>
+<span class="sourceLineNo">095</span>   *<a name="line.95"></a>
+<span class="sourceLineNo">096</span>   * &lt;p&gt;Not all {@link EventCache} implementations need support<a name="line.96"></a>
+<span class="sourceLineNo">097</span>   * synchronization.  An implementation of this method that does<a name="line.97"></a>
+<span class="sourceLineNo">098</span>   * nothing is explicitly permitted.&lt;/p&gt;<a name="line.98"></a>
+<span class="sourceLineNo">099</span>   */<a name="line.99"></a>
+<span class="sourceLineNo">100</span>  public void synchronize();<a name="line.100"></a>
+<span class="sourceLineNo">101</span>  <a name="line.101"></a>
+<span class="sourceLineNo">102</span>}<a name="line.102"></a>
 
 
 
