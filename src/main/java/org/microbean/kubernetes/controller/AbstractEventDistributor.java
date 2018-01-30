@@ -54,14 +54,14 @@ public abstract class AbstractEventDistributor<T extends HasMetadata> extends Re
    *
    * @param knownObjects a mutable {@link Map} of {@link HasMetadata}
    * objects indexed by their keys (often a pairing of namespace and
-   * name); must not be {@code null}; <strong>will have its contents
+   * name); may be {@code null}, but this will result in inaccurate
+   * deletion tracking and the inability to keep track of the
+   * {@linkplain Event#getPriorResource() prior state of resources};
+   * if non-{@code null} <strong>will have its contents
    * changed</strong> by this {@link AbstractEventDistributor}'s
-   * {@link #accept(EventQueue)} method; <strong>will be synchronized
-   * on</strong> by this {@link AbstractEventDistributor}'s {@link
-   * #accept(EventQueue)} method
-   *
-   * @exception NullPointerException if {@code knownObjects} is {@code
-   * null}
+   * {@link #accept(EventQueue)} method; if non-{@code null}
+   * <strong>will be synchronized on</strong> by this {@link
+   * AbstractEventDistributor}'s {@link #accept(EventQueue)} method
    *
    * @see #accept(EventQueue)
    */
@@ -97,8 +97,7 @@ public abstract class AbstractEventDistributor<T extends HasMetadata> extends Re
    */
   @Override
   protected void accept(final Event.Type eventType, final T priorResource, final T resource) {
-    Objects.requireNonNull(eventType);
-    this.fireEvent(new Event<T>(this, eventType, priorResource, resource));
+    this.fireEvent(new Event<T>(this, Objects.requireNonNull(eventType), priorResource, Objects.requireNonNull(resource)));
   }
   
   /**
