@@ -35,7 +35,7 @@ import net.jcip.annotations.GuardedBy;
  *
  * @see #accept(Event.Type, HasMetadata, HasMetadata)
  */
-public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> implements Consumer<EventQueue<T>> {
+public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> implements Consumer<EventQueue<? extends T>> {
 
 
   /*
@@ -104,14 +104,14 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
    * @see #accept(Event.Type, HasMetadata, HasMetadata)
    */
   @Override
-  public final void accept(final EventQueue<T> eventQueue) {
+  public final void accept(final EventQueue<? extends T> eventQueue) {
     if (eventQueue != null) {
       synchronized (eventQueue) {
         final Object key = eventQueue.getKey();
         if (key == null) {
           throw new IllegalStateException("eventQueue.getKey() == null; eventQueue: " + eventQueue);
         }        
-        for (final Event<T> event : eventQueue) {
+        for (final Event<? extends T> event : eventQueue) {
           if (event != null) {
             assert key.equals(event.getKey());            
             final Event.Type eventType = event.getType();
