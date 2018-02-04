@@ -30,6 +30,9 @@ import java.util.Spliterator;
 
 import java.util.function.Consumer;
 
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 
@@ -159,7 +162,16 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
   @GuardedBy("itself")
   private final Map<?, ? extends T> knownObjects;
 
+  /**
+   * A {@link Logger} used by this {@link EventQueueCollection}.
+   *
+   * <p>This field is never {@code null}.</p>
+   *
+   * @see #createLogger()
+   */
+  protected final Logger logger;
 
+  
   /*
    * Constructors.
    */
@@ -214,8 +226,28 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    */
   public EventQueueCollection(final Map<?, ? extends T> knownObjects, final int initialCapacity, final float loadFactor) {
     super();
+    final String cn = this.getClass().getName();
+    final String mn = "<init>";
+    this.logger = this.createLogger();
+    if (logger == null) {
+      throw new IllegalStateException();
+    }
+    if (this.logger.isLoggable(Level.FINER)) {
+      final String knownObjectsString;
+      if (knownObjects == null) {
+        knownObjectsString = null;
+      } else {
+        synchronized (knownObjects) {
+          knownObjectsString = knownObjects.toString();
+        }
+      }
+      this.logger.entering(cn, mn, new Object[] { knownObjectsString, Integer.valueOf(initialCapacity), Float.valueOf(loadFactor) });
+    }
     this.map = new LinkedHashMap<>(initialCapacity, loadFactor);
     this.knownObjects = knownObjects;
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
   }
 
 
@@ -223,6 +255,9 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * Instance methods.
    */
 
+  protected Logger createLogger() {
+    return Logger.getLogger(this.getClass().getName());
+  }
   
   private final Map<?, ? extends T> getKnownObjects() {
     return this.knownObjects;
@@ -281,8 +316,8 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * Invokes the {@link Consumer#accept(Object)} method for each
    * {@link EventQueue} stored by this {@link EventQueueCollection}.
    *
-   * @param a {@link Consumer} of {@link EventQueue}s; may be {@code
-   * null} in which case no action will be taken
+   * @param action a {@link Consumer} of {@link EventQueue}s; may be
+   * {@code null} in which case no action will be taken
    *
    * @see Iterable#forEach(Consumer)
    */
@@ -299,6 +334,12 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * HasMetadata)} at some point, and if there are no {@link
    * EventQueue}s remaining to be {@linkplain #start(Consumer)
    * removed}.
+   *
+   * @return {@code true} if this {@link EventQueueCollection} has
+   * been populated via a call to {@link #add(Object, Event.Type,
+   * HasMetadata)} at some point, and if there are no {@link
+   * EventQueue}s remaining to be {@linkplain #start(Consumer)
+   * removed}; {@code false} otherwise
    *
    * @see #replace(Collection, Object)
    *
@@ -321,6 +362,11 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    */
   @Override
   public synchronized final void synchronize() {
+    final String cn = this.getClass().getName();
+    final String mn = "synchronize";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
     final Map<?, ? extends T> knownObjects = this.getKnownObjects();
     if (knownObjects != null) {
       synchronized (knownObjects) {
@@ -344,6 +390,9 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
           }
         }
       }
+    }
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
     }
   }
 
@@ -384,6 +433,19 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    */
   @Override
   public synchronized final void replace(final Collection<? extends T> incomingResources, final Object resourceVersion) {
+    final String cn = this.getClass().getName();
+    final String mn = "replace";
+    if (this.logger.isLoggable(Level.FINER)) {
+      final String incomingResourcesString;
+      if (incomingResources == null) {
+        incomingResourcesString = null;
+      } else {
+        synchronized (incomingResources) {
+          incomingResourcesString = incomingResources.toString();
+        }
+      }
+      this.logger.entering(cn, mn, new Object[] { incomingResourcesString, resourceVersion });
+    }
     
     final int size;
     final Set<Object> replacementKeys;
@@ -498,7 +560,10 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       this.populated = true;
       this.initialPopulationCount = size + queuedDeletions;
     }
-    
+
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
   }
 
   /**
@@ -527,7 +592,16 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * @see HasMetadatas#getKey(HasMetadata)
    */
   protected Object getKey(final T resource) {
-    return HasMetadatas.getKey(resource);
+    final String cn = this.getClass().getName();
+    final String mn = "getKey";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, resource);
+    }
+    final Object returnValue = HasMetadatas.getKey(resource);
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, returnValue);
+    }
+    return returnValue;
   }
 
   /**
@@ -539,7 +613,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    *
    * <p>Overrides of this method must not return {@code null}.</p>
    *
-   * @param the key {@linkplain EventQueue#getKey() for the new
+   * @param key the key {@linkplain EventQueue#getKey() for the new
    * <code>EventQueue</code>}; must not be {@code null}
    *
    * @return the new {@link EventQueue}; never {@code null}
@@ -549,7 +623,16 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * @see EventQueue#EventQueue(Object)
    */
   protected EventQueue<T> createEventQueue(final Object key) {
-    return new EventQueue<T>(key);
+    final String cn = this.getClass().getName();
+    final String mn = "createEventQueue";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, key);
+    }
+    final EventQueue<T> returnValue = new EventQueue<T>(key);
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, returnValue);
+    }
+    return returnValue;
   }
 
   /**
@@ -568,6 +651,12 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    */
   @NonBlocking
   public final void start(final Consumer<? super EventQueue<? extends T>> siphon) {
+    final String cn = this.getClass().getName();
+    final String mn = "start";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, siphon);
+    }
+    
     Objects.requireNonNull(siphon);
     synchronized (this) {
       if (this.consumerThread == null) {
@@ -581,6 +670,10 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         this.consumerThread.setDaemon(true);
         this.consumerThread.start();
       }
+    }
+    
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
     }
   }
 
@@ -600,6 +693,12 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    */
   @Override
   public final void close() {
+    final String cn = this.getClass().getName();
+    final String mn = "close";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
+    
     final Thread consumerThread;
     synchronized (this) {
       consumerThread = this.consumerThread;
@@ -619,6 +718,10 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
           this.closing = false;
         }
       }
+    }
+
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
     }
   }
 
@@ -646,6 +749,12 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    */
   @Blocking
   private final void attach(final Consumer<? super EventQueue<? extends T>> siphon) throws InterruptedException {
+    final String cn = this.getClass().getName();
+    final String mn = "attach";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, siphon);
+    }
+    
     Objects.requireNonNull(siphon);
     while (!this.closing) {
       synchronized (this) {
@@ -662,10 +771,20 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         }
       }
     }
+
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
   }
 
   @Blocking
   private synchronized final EventQueue<T> take() throws InterruptedException {
+    final String cn = this.getClass().getName();
+    final String mn = "take";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
+    
     while (!this.closing && this.isEmpty()) {
       try {
         this.wait();
@@ -692,6 +811,14 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       }
       Thread.interrupted(); // clear any interrupted status now that we know we're going to be successful
     }
+
+    if (this.logger.isLoggable(Level.FINER)) {
+      final String eventQueueString;
+      synchronized (returnValue) {
+        eventQueueString = returnValue.toString();
+      }
+      this.logger.exiting(cn, mn, eventQueueString);
+    }    
     return returnValue;
   }
 
@@ -716,12 +843,25 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * @param resource the {@linkplain Event#getResource() resource} of
    * the {@link Event} that will be created; must not be
    * {@code null}
+   *
+   * @return the created {@link Event}; never {@code null}
    */
   protected Event<T> createEvent(final Object source, final Event.Type eventType, final T resource) {
+    final String cn = this.getClass().getName();
+    final String mn = "createEvent";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, new Object[] { source, eventType, resource });
+    }
+
     Objects.requireNonNull(source);
     Objects.requireNonNull(eventType);
     Objects.requireNonNull(resource);
-    return new Event<T>(source, eventType, null, resource);
+    final Event<T> returnValue = new Event<T>(source, eventType, null, resource);
+
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, returnValue);
+    }
+    return returnValue;
   }
 
   /**
@@ -796,11 +936,22 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * @see Event
    */
   private final Event<T> add(final Object source, final Event.Type eventType, final T resource, final boolean populate) {
+    final String cn = this.getClass().getName();
+    final String mn = "add";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, new Object[] { source, eventType, resource, Boolean.valueOf(populate)});
+    }
+    
     final Event<T> event = this.createEvent(source, eventType, resource);
     if (event == null) {
       throw new IllegalStateException("createEvent() == null");
     }
-    return this.add(event, populate);
+    final Event<T> returnValue = this.add(event, populate);
+
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, returnValue);
+    }
+    return returnValue;
   }
 
   /**
@@ -831,6 +982,12 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * @see Event
    */
   private final Event<T> add(final Event<T> event, final boolean populate) {
+    final String cn = this.getClass().getName();
+    final String mn = "add";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, new Object[] { event, Boolean.valueOf(populate) });
+    }
+    
     Objects.requireNonNull(event);
     final Object key = event.getKey();
     if (key == null) {
@@ -867,6 +1024,10 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         }
       }
       this.notifyAll();
+    }
+
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, returnValue);
     }
     return returnValue;
   }

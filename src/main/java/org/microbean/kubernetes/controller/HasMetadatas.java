@@ -16,6 +16,9 @@
  */
 package org.microbean.kubernetes.controller;
 
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 
@@ -26,6 +29,14 @@ public final class HasMetadatas {
   }
   
   public static final Object getKey(final HasMetadata resource) {
+    final String cn = HasMetadatas.class.getName();
+    final String mn = "getKey";
+    final Logger logger = Logger.getLogger(cn);
+    assert logger != null;
+    if (logger.isLoggable(Level.FINER)) {
+      logger.entering(cn, mn, resource);
+    }
+    
     final Object returnValue;
     if (resource == null) {
       returnValue = null;
@@ -47,6 +58,10 @@ public final class HasMetadatas {
           returnValue = new StringBuilder(namespace).append("/").append(name).toString();
         }
       }
+    }
+
+    if (logger.isLoggable(Level.FINER)) {
+      logger.exiting(cn, mn, returnValue);
     }
     return returnValue;
   }

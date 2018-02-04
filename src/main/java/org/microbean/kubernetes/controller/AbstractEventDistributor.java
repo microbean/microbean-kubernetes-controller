@@ -81,8 +81,8 @@ public abstract class AbstractEventDistributor<T extends HasMetadata> extends Re
    * HasMetadata, HasMetadata)} method by creating an {@link Event}
    * and calling the {@link #fireEvent(Event)} method with it.
    *
-   * @param eventType the {@link Type} of the new {@link Event}; must
-   * not be {@code null}
+   * @param eventType the {@link Event.Type} describing the new {@link
+   * Event}; must not be {@code null}
    *
    * @param priorResource a {@link HasMetadata} representing the
    * <em>prior state</em> of the {@linkplain Event#getResource() Kubernetes

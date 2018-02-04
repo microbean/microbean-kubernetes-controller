@@ -237,9 +237,11 @@
     <plugins>
       <plugin>
         <artifactId>maven-javadoc-plugin</artifactId>
+        <!--
         <configuration>
           <doclint>-missing</doclint>
         </configuration>
+        -->
       </plugin>
       <plugin>
         <groupId>org.codehaus.mojo</groupId>

@@ -115,6 +115,8 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    *
    * <p>This method never returns {@code null}.</p>
    *
+   * @return a non-{@code null} {@link Object}
+   *
    * @see #EventQueue(Object)
    */
   public final Object getKey() {
@@ -334,7 +336,7 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    *
    * @param events an {@link
    * Collections#unmodifiableCollection(Collection) unmodifiable
-   * <code>Collection</code>} of {@link Event}s representing the
+   * <tt>Collection</tt>} of {@link Event}s representing the
    * current state of this {@link EventQueue}; will never be {@code
    * null}
    *

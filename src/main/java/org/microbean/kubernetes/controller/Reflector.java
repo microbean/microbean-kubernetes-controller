@@ -34,6 +34,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 import io.fabric8.kubernetes.client.DefaultKubernetesClient; // for javadoc only
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watcher;
@@ -115,6 +118,8 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   @GuardedBy("itself")
   private final EventCache<T> eventCache;
 
+  private final Logger logger;
+  
 
   /*
    * Constructors.
@@ -210,6 +215,15 @@ public class Reflector<T extends HasMetadata> implements Closeable {
                                                                                                                               final ScheduledExecutorService synchronizationExecutorService,
                                                                                                                               final Duration synchronizationInterval) {
     super();
+    this.logger = this.createLogger();
+    if (this.logger == null) {
+      throw new IllegalStateException("createLogger() == null");
+    }
+    final String cn = this.getClass().getName();
+    final String mn = "<init>";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, new Object[] { operation, eventCache, synchronizationExecutorService, synchronizationInterval });
+    }
     Objects.requireNonNull(operation);
     this.eventCache = Objects.requireNonNull(eventCache);
     // TODO: research: maybe: operation.withField("metadata.resourceVersion", "0")?    
@@ -227,6 +241,9 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       this.synchronizationExecutorService = synchronizationExecutorService;
       this.shutdownSynchronizationExecutorServiceOnClose = false;
     }
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
   }
 
 
@@ -235,6 +252,20 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    */
   
 
+  /**
+   * Returns a {@link Logger} that will be used for this {@link
+   * Reflector}.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>Overrides of this method must not return {@code null}.</p>
+   *
+   * @return a non-{@code null} {@link Logger}
+   */
+  protected Logger createLogger() {
+    return Logger.getLogger(this.getClass().getName());
+  }
+  
   /**
    * Notionally closes this {@link Reflector} by terminating any
    * {@link Thread}s that it has started and invoking the {@link
@@ -247,6 +278,11 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    */
   @Override
   public synchronized final void close() throws IOException {
+    final String cn = this.getClass().getName();
+    final String mn = "close";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
     try {
       final ScheduledFuture<?> synchronizationTask = this.synchronizationTask;
       if (synchronizationTask != null) {
@@ -259,9 +295,17 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     } finally {
       this.onClose();
     }
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
   }
 
   private synchronized final void closeSynchronizationExecutorService() {
+    final String cn = this.getClass().getName();
+    final String mn = "closeSynchronizationExecutorService";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
     if (this.synchronizationExecutorService != null && this.shutdownSynchronizationExecutorServiceOnClose) {
       this.synchronizationExecutorService.shutdown();
       try {
@@ -276,9 +320,17 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         Thread.currentThread().interrupt();
       }
     }
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
   }
 
   private synchronized final void setUpSynchronization() {
+    final String cn = this.getClass().getName();
+    final String mn = "setUpSynchronization";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
     if (this.synchronizationExecutorService != null) {
       
       final Duration synchronizationDuration = this.getSynchronizationInterval();
@@ -307,6 +359,9 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       }
       
     }
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
   }
 
   /**
@@ -330,7 +385,16 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * synchronize}; {@code false} otherwise
    */
   protected boolean shouldSynchronize() {
-    return this.synchronizationExecutorService != null;
+    final String cn = this.getClass().getName();
+    final String mn = "shouldSynchronize";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
+    final boolean returnValue = this.synchronizationExecutorService != null;
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, Boolean.valueOf(returnValue));
+    }
+    return returnValue;
   }
   
   private final Duration getSynchronizationInterval() {
@@ -361,6 +425,11 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    */
   @NonBlocking
   public synchronized final void start() {
+    final String cn = this.getClass().getName();
+    final String mn = "start";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
     if (this.watch == null) {
 
       // Run a list operation, and get the resourceVersion of that list.
@@ -404,6 +473,9 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       } finally {
         this.closeSynchronizationExecutorService();
       }
+    }
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
     }
   }
 
@@ -472,6 +544,11 @@ public class Reflector<T extends HasMetadata> implements Closeable {
      */
     @Override
     public final void eventReceived(final Watcher.Action action, final T resource) {
+      final String cn = this.getClass().getName();
+      final String mn = "eventReceived";
+      if (logger.isLoggable(Level.FINER)) {
+        logger.entering(cn, mn, new Object[] { action, resource });
+      }
       Objects.requireNonNull(action);
       Objects.requireNonNull(resource);
 
@@ -527,6 +604,9 @@ public class Reflector<T extends HasMetadata> implements Closeable {
 
       // Add an Event of the proper kind to our EventCache.
       if (eventType != null) {
+        if (logger.isLoggable(Level.FINE)) {
+          logger.logp(Level.FINE, cn, mn, "Adding event to cache: {0} {1}", new Object[] { eventType, resource });
+        }
         synchronized (eventCache) {
           eventCache.add(Reflector.this, eventType, resource);
         }
@@ -536,6 +616,10 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       // that of this last successful watch() operation.  We set it
       // earlier during a list() operation.
       setLastSynchronizationResourceVersion(metadata.getResourceVersion());
+
+      if (logger.isLoggable(Level.FINER)) {
+        logger.exiting(cn, mn);
+      }
     }
 
     /**

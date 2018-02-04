@@ -21,6 +21,9 @@ import java.util.Objects;
 
 import java.util.function.Consumer;
 
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 import io.fabric8.kubernetes.api.model.HasMetadata;
 
 import net.jcip.annotations.GuardedBy;
@@ -30,10 +33,15 @@ import net.jcip.annotations.GuardedBy;
  * Kubernetes resources they contain before allowing subclasses to
  * process their individual {@link Event}s.
  *
+ * <p>Typically you would supply an implementation of this class to a
+ * {@link Controller}.</p>
+ *
  * @author <a href="https://about.me/lairdnelson"
  * target="_parent">Laird Nelson</a>
  *
  * @see #accept(Event.Type, HasMetadata, HasMetadata)
+ *
+ * @see Controller
  */
 public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> implements Consumer<EventQueue<? extends T>> {
 
@@ -62,7 +70,17 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
   @GuardedBy("itself")
   private final Map<Object, T> knownObjects;
 
+  /**
+   * A {@link Logger} for use by this {@link
+   * ResourceTrackingEventQueueConsumer} implementation.
+   *
+   * <p>This field is never {@code null}.</p>
+   *
+   * @see #createLogger()
+   */
+  protected final Logger logger;
 
+  
   /*
    * Constructors.
    */
@@ -84,11 +102,52 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
    */
   protected ResourceTrackingEventQueueConsumer(final Map<Object, T> knownObjects) {
     super();
+    this.logger = this.createLogger();
+    if (this.logger == null) {
+      throw new IllegalStateException("createLogger() == null");
+    }
+    final String cn = this.getClass().getName();
+    final String mn = "<init>";
+    if (this.logger.isLoggable(Level.FINER)) {
+      final String knownObjectsString;
+      if (knownObjects == null) {
+        knownObjectsString = null;
+      } else {
+        synchronized (knownObjects) {
+          knownObjectsString = knownObjects.toString();
+        }
+      }      
+      this.logger.entering(cn, mn, knownObjectsString);
+    }
     this.knownObjects = knownObjects;
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
   }
 
+
+  /*
+   * Instance methods.
+   */
+
+
   /**
-   * {@linkplain EvnetQueue#iterator() Loops through} all the {@link
+   * Returns a {@link Logger} for use with this {@link
+   * ResourceTrackingEventQueueConsumer}.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>Overrides of this method must not return {@code null}.</p>
+   *
+   * @return a non-{@code null} {@link Logger}
+   */
+  protected Logger createLogger() {
+    return Logger.getLogger(this.getClass().getName());
+  }
+
+  
+  /**
+   * {@linkplain EventQueue#iterator() Loops through} all the {@link
    * Event}s in the supplied {@link EventQueue}, keeping track of the
    * {@link HasMetadata} it concerns along the way by
    * <strong>synchronizing on</strong> and writing to the {@link Map}
@@ -105,8 +164,17 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
    */
   @Override
   public final void accept(final EventQueue<? extends T> eventQueue) {
-    if (eventQueue != null) {
+    final String cn = this.getClass().getName();
+    final String mn = "accept";
+    if (eventQueue == null) {
+      if (this.logger.isLoggable(Level.FINER)) {
+        this.logger.entering(cn, mn, null);
+      }
+    } else {
       synchronized (eventQueue) {
+        if (this.logger.isLoggable(Level.FINER)) {
+          this.logger.entering(cn, mn, eventQueue);
+        }
         final Object key = eventQueue.getKey();
         if (key == null) {
           throw new IllegalStateException("eventQueue.getKey() == null; eventQueue: " + eventQueue);
@@ -149,6 +217,9 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
           }
         }
       }
+    }
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
     }
   }
 
