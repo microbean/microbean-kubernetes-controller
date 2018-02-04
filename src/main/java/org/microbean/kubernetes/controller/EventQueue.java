@@ -366,8 +366,8 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
     synchronized (this) {
       value = this.events;
       c = value == null ? 0 : value.hashCode();
-      hashCode = 37 * hashCode + c;
     }
+    hashCode = 37 * hashCode + c;
 
     return hashCode;
   }
