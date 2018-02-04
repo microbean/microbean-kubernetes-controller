@@ -29,166 +29,237 @@
 <span class="sourceLineNo">021</span><a name="line.21"></a>
 <span class="sourceLineNo">022</span>import java.util.function.Consumer;<a name="line.22"></a>
 <span class="sourceLineNo">023</span><a name="line.23"></a>
-<span class="sourceLineNo">024</span>import io.fabric8.kubernetes.api.model.HasMetadata;<a name="line.24"></a>
-<span class="sourceLineNo">025</span><a name="line.25"></a>
-<span class="sourceLineNo">026</span>import net.jcip.annotations.GuardedBy;<a name="line.26"></a>
-<span class="sourceLineNo">027</span><a name="line.27"></a>
-<span class="sourceLineNo">028</span>/**<a name="line.28"></a>
-<span class="sourceLineNo">029</span> * A {@link Consumer} of {@link EventQueue}s that tracks the<a name="line.29"></a>
-<span class="sourceLineNo">030</span> * Kubernetes resources they contain before allowing subclasses to<a name="line.30"></a>
-<span class="sourceLineNo">031</span> * process their individual {@link Event}s.<a name="line.31"></a>
-<span class="sourceLineNo">032</span> *<a name="line.32"></a>
-<span class="sourceLineNo">033</span> * @author &lt;a href="https://about.me/lairdnelson"<a name="line.33"></a>
-<span class="sourceLineNo">034</span> * target="_parent"&gt;Laird Nelson&lt;/a&gt;<a name="line.34"></a>
+<span class="sourceLineNo">024</span>import java.util.logging.Level;<a name="line.24"></a>
+<span class="sourceLineNo">025</span>import java.util.logging.Logger;<a name="line.25"></a>
+<span class="sourceLineNo">026</span><a name="line.26"></a>
+<span class="sourceLineNo">027</span>import io.fabric8.kubernetes.api.model.HasMetadata;<a name="line.27"></a>
+<span class="sourceLineNo">028</span><a name="line.28"></a>
+<span class="sourceLineNo">029</span>import net.jcip.annotations.GuardedBy;<a name="line.29"></a>
+<span class="sourceLineNo">030</span><a name="line.30"></a>
+<span class="sourceLineNo">031</span>/**<a name="line.31"></a>
+<span class="sourceLineNo">032</span> * A {@link Consumer} of {@link EventQueue}s that tracks the<a name="line.32"></a>
+<span class="sourceLineNo">033</span> * Kubernetes resources they contain before allowing subclasses to<a name="line.33"></a>
+<span class="sourceLineNo">034</span> * process their individual {@link Event}s.<a name="line.34"></a>
 <span class="sourceLineNo">035</span> *<a name="line.35"></a>
-<span class="sourceLineNo">036</span> * @see #accept(Event.Type, HasMetadata, HasMetadata)<a name="line.36"></a>
-<span class="sourceLineNo">037</span> */<a name="line.37"></a>
-<span class="sourceLineNo">038</span>public abstract class ResourceTrackingEventQueueConsumer&lt;T extends HasMetadata&gt; implements Consumer&lt;EventQueue&lt;? extends T&gt;&gt; {<a name="line.38"></a>
-<span class="sourceLineNo">039</span><a name="line.39"></a>
-<span class="sourceLineNo">040</span><a name="line.40"></a>
-<span class="sourceLineNo">041</span>  /*<a name="line.41"></a>
-<span class="sourceLineNo">042</span>   * Instance fields.<a name="line.42"></a>
-<span class="sourceLineNo">043</span>   */<a name="line.43"></a>
-<span class="sourceLineNo">044</span><a name="line.44"></a>
-<span class="sourceLineNo">045</span>  <a name="line.45"></a>
-<span class="sourceLineNo">046</span>  /**<a name="line.46"></a>
-<span class="sourceLineNo">047</span>   * A mutable {@link Map} of {@link HasMetadata} objects indexed by<a name="line.47"></a>
-<span class="sourceLineNo">048</span>   * their keys (often a pairing of namespace and name).<a name="line.48"></a>
-<span class="sourceLineNo">049</span>   *<a name="line.49"></a>
-<span class="sourceLineNo">050</span>   * &lt;p&gt;This field may be {@code null} in which case no resource<a name="line.50"></a>
-<span class="sourceLineNo">051</span>   * tracking will take place.&lt;/p&gt;<a name="line.51"></a>
-<span class="sourceLineNo">052</span>   *<a name="line.52"></a>
-<span class="sourceLineNo">053</span>   * &lt;p&gt;The value of this field is {@linkplain<a name="line.53"></a>
-<span class="sourceLineNo">054</span>   * #AbstractEventDistributor(Map) supplied at construction time} and<a name="line.54"></a>
-<span class="sourceLineNo">055</span>   * is &lt;strong&gt;synchronized on&lt;/strong&gt; and written to, if non-{@code<a name="line.55"></a>
-<span class="sourceLineNo">056</span>   * null}, by the {@link #accept(EventQueue)} method.&lt;/p&gt;<a name="line.56"></a>
+<span class="sourceLineNo">036</span> * &lt;p&gt;Typically you would supply an implementation of this class to a<a name="line.36"></a>
+<span class="sourceLineNo">037</span> * {@link Controller}.&lt;/p&gt;<a name="line.37"></a>
+<span class="sourceLineNo">038</span> *<a name="line.38"></a>
+<span class="sourceLineNo">039</span> * @author &lt;a href="https://about.me/lairdnelson"<a name="line.39"></a>
+<span class="sourceLineNo">040</span> * target="_parent"&gt;Laird Nelson&lt;/a&gt;<a name="line.40"></a>
+<span class="sourceLineNo">041</span> *<a name="line.41"></a>
+<span class="sourceLineNo">042</span> * @see #accept(Event.Type, HasMetadata, HasMetadata)<a name="line.42"></a>
+<span class="sourceLineNo">043</span> *<a name="line.43"></a>
+<span class="sourceLineNo">044</span> * @see Controller<a name="line.44"></a>
+<span class="sourceLineNo">045</span> */<a name="line.45"></a>
+<span class="sourceLineNo">046</span>public abstract class ResourceTrackingEventQueueConsumer&lt;T extends HasMetadata&gt; implements Consumer&lt;EventQueue&lt;? extends T&gt;&gt; {<a name="line.46"></a>
+<span class="sourceLineNo">047</span><a name="line.47"></a>
+<span class="sourceLineNo">048</span><a name="line.48"></a>
+<span class="sourceLineNo">049</span>  /*<a name="line.49"></a>
+<span class="sourceLineNo">050</span>   * Instance fields.<a name="line.50"></a>
+<span class="sourceLineNo">051</span>   */<a name="line.51"></a>
+<span class="sourceLineNo">052</span><a name="line.52"></a>
+<span class="sourceLineNo">053</span>  <a name="line.53"></a>
+<span class="sourceLineNo">054</span>  /**<a name="line.54"></a>
+<span class="sourceLineNo">055</span>   * A mutable {@link Map} of {@link HasMetadata} objects indexed by<a name="line.55"></a>
+<span class="sourceLineNo">056</span>   * their keys (often a pairing of namespace and name).<a name="line.56"></a>
 <span class="sourceLineNo">057</span>   *<a name="line.57"></a>
-<span class="sourceLineNo">058</span>   * &lt;p&gt;This class &lt;strong&gt;synchronizes on this field's<a name="line.58"></a>
-<span class="sourceLineNo">059</span>   * value&lt;/strong&gt;, if it is non-{@code null}, when mutating its<a name="line.59"></a>
-<span class="sourceLineNo">060</span>   * contents.&lt;/p&gt;<a name="line.60"></a>
-<span class="sourceLineNo">061</span>   */<a name="line.61"></a>
-<span class="sourceLineNo">062</span>  @GuardedBy("itself")<a name="line.62"></a>
-<span class="sourceLineNo">063</span>  private final Map&lt;Object, T&gt; knownObjects;<a name="line.63"></a>
-<span class="sourceLineNo">064</span><a name="line.64"></a>
-<span class="sourceLineNo">065</span><a name="line.65"></a>
-<span class="sourceLineNo">066</span>  /*<a name="line.66"></a>
-<span class="sourceLineNo">067</span>   * Constructors.<a name="line.67"></a>
-<span class="sourceLineNo">068</span>   */<a name="line.68"></a>
-<span class="sourceLineNo">069</span><a name="line.69"></a>
-<span class="sourceLineNo">070</span><a name="line.70"></a>
-<span class="sourceLineNo">071</span>  /**<a name="line.71"></a>
-<span class="sourceLineNo">072</span>   * Creates a new {@link ResourceTrackingEventQueueConsumer}.<a name="line.72"></a>
-<span class="sourceLineNo">073</span>   *<a name="line.73"></a>
-<span class="sourceLineNo">074</span>   * @param knownObjects a mutable {@link Map} of {@link HasMetadata}<a name="line.74"></a>
-<span class="sourceLineNo">075</span>   * objects indexed by their keys (often a pairing of namespace and<a name="line.75"></a>
-<span class="sourceLineNo">076</span>   * name); must not be {@code null}; &lt;strong&gt;will have its contents<a name="line.76"></a>
-<span class="sourceLineNo">077</span>   * changed&lt;/strong&gt; by this {@link<a name="line.77"></a>
-<span class="sourceLineNo">078</span>   * ResourceTrackingEventQueueConsumer}'s {@link #accept(EventQueue)}<a name="line.78"></a>
-<span class="sourceLineNo">079</span>   * method; &lt;strong&gt;will be synchronized on&lt;/strong&gt; by this {@link<a name="line.79"></a>
-<span class="sourceLineNo">080</span>   * ResourceTrackingEventQueueConsumer}'s {@link #accept(EventQueue)}<a name="line.80"></a>
-<span class="sourceLineNo">081</span>   * method<a name="line.81"></a>
-<span class="sourceLineNo">082</span>   *<a name="line.82"></a>
-<span class="sourceLineNo">083</span>   * @see #accept(EventQueue)<a name="line.83"></a>
-<span class="sourceLineNo">084</span>   */<a name="line.84"></a>
-<span class="sourceLineNo">085</span>  protected ResourceTrackingEventQueueConsumer(final Map&lt;Object, T&gt; knownObjects) {<a name="line.85"></a>
-<span class="sourceLineNo">086</span>    super();<a name="line.86"></a>
-<span class="sourceLineNo">087</span>    this.knownObjects = knownObjects;<a name="line.87"></a>
-<span class="sourceLineNo">088</span>  }<a name="line.88"></a>
-<span class="sourceLineNo">089</span><a name="line.89"></a>
-<span class="sourceLineNo">090</span>  /**<a name="line.90"></a>
-<span class="sourceLineNo">091</span>   * {@linkplain EvnetQueue#iterator() Loops through} all the {@link<a name="line.91"></a>
-<span class="sourceLineNo">092</span>   * Event}s in the supplied {@link EventQueue}, keeping track of the<a name="line.92"></a>
-<span class="sourceLineNo">093</span>   * {@link HasMetadata} it concerns along the way by<a name="line.93"></a>
-<span class="sourceLineNo">094</span>   * &lt;strong&gt;synchronizing on&lt;/strong&gt; and writing to the {@link Map}<a name="line.94"></a>
-<span class="sourceLineNo">095</span>   * {@linkplain #ResourceTrackingEventQueueConsumer(Map) supplied at<a name="line.95"></a>
-<span class="sourceLineNo">096</span>   * construction time}.<a name="line.96"></a>
-<span class="sourceLineNo">097</span>   *<a name="line.97"></a>
-<span class="sourceLineNo">098</span>   * &lt;p&gt;Individual {@link Event}s are forwarded on to the {@link<a name="line.98"></a>
-<span class="sourceLineNo">099</span>   * #accept(Event.Type, HasMetadata, HasMetadata)} method.&lt;/p&gt;<a name="line.99"></a>
+<span class="sourceLineNo">058</span>   * &lt;p&gt;This field may be {@code null} in which case no resource<a name="line.58"></a>
+<span class="sourceLineNo">059</span>   * tracking will take place.&lt;/p&gt;<a name="line.59"></a>
+<span class="sourceLineNo">060</span>   *<a name="line.60"></a>
+<span class="sourceLineNo">061</span>   * &lt;p&gt;The value of this field is {@linkplain<a name="line.61"></a>
+<span class="sourceLineNo">062</span>   * #AbstractEventDistributor(Map) supplied at construction time} and<a name="line.62"></a>
+<span class="sourceLineNo">063</span>   * is &lt;strong&gt;synchronized on&lt;/strong&gt; and written to, if non-{@code<a name="line.63"></a>
+<span class="sourceLineNo">064</span>   * null}, by the {@link #accept(EventQueue)} method.&lt;/p&gt;<a name="line.64"></a>
+<span class="sourceLineNo">065</span>   *<a name="line.65"></a>
+<span class="sourceLineNo">066</span>   * &lt;p&gt;This class &lt;strong&gt;synchronizes on this field's<a name="line.66"></a>
+<span class="sourceLineNo">067</span>   * value&lt;/strong&gt;, if it is non-{@code null}, when mutating its<a name="line.67"></a>
+<span class="sourceLineNo">068</span>   * contents.&lt;/p&gt;<a name="line.68"></a>
+<span class="sourceLineNo">069</span>   */<a name="line.69"></a>
+<span class="sourceLineNo">070</span>  @GuardedBy("itself")<a name="line.70"></a>
+<span class="sourceLineNo">071</span>  private final Map&lt;Object, T&gt; knownObjects;<a name="line.71"></a>
+<span class="sourceLineNo">072</span><a name="line.72"></a>
+<span class="sourceLineNo">073</span>  /**<a name="line.73"></a>
+<span class="sourceLineNo">074</span>   * A {@link Logger} for use by this {@link<a name="line.74"></a>
+<span class="sourceLineNo">075</span>   * ResourceTrackingEventQueueConsumer} implementation.<a name="line.75"></a>
+<span class="sourceLineNo">076</span>   *<a name="line.76"></a>
+<span class="sourceLineNo">077</span>   * &lt;p&gt;This field is never {@code null}.&lt;/p&gt;<a name="line.77"></a>
+<span class="sourceLineNo">078</span>   *<a name="line.78"></a>
+<span class="sourceLineNo">079</span>   * @see #createLogger()<a name="line.79"></a>
+<span class="sourceLineNo">080</span>   */<a name="line.80"></a>
+<span class="sourceLineNo">081</span>  protected final Logger logger;<a name="line.81"></a>
+<span class="sourceLineNo">082</span><a name="line.82"></a>
+<span class="sourceLineNo">083</span>  <a name="line.83"></a>
+<span class="sourceLineNo">084</span>  /*<a name="line.84"></a>
+<span class="sourceLineNo">085</span>   * Constructors.<a name="line.85"></a>
+<span class="sourceLineNo">086</span>   */<a name="line.86"></a>
+<span class="sourceLineNo">087</span><a name="line.87"></a>
+<span class="sourceLineNo">088</span><a name="line.88"></a>
+<span class="sourceLineNo">089</span>  /**<a name="line.89"></a>
+<span class="sourceLineNo">090</span>   * Creates a new {@link ResourceTrackingEventQueueConsumer}.<a name="line.90"></a>
+<span class="sourceLineNo">091</span>   *<a name="line.91"></a>
+<span class="sourceLineNo">092</span>   * @param knownObjects a mutable {@link Map} of {@link HasMetadata}<a name="line.92"></a>
+<span class="sourceLineNo">093</span>   * objects indexed by their keys (often a pairing of namespace and<a name="line.93"></a>
+<span class="sourceLineNo">094</span>   * name); must not be {@code null}; &lt;strong&gt;will have its contents<a name="line.94"></a>
+<span class="sourceLineNo">095</span>   * changed&lt;/strong&gt; by this {@link<a name="line.95"></a>
+<span class="sourceLineNo">096</span>   * ResourceTrackingEventQueueConsumer}'s {@link #accept(EventQueue)}<a name="line.96"></a>
+<span class="sourceLineNo">097</span>   * method; &lt;strong&gt;will be synchronized on&lt;/strong&gt; by this {@link<a name="line.97"></a>
+<span class="sourceLineNo">098</span>   * ResourceTrackingEventQueueConsumer}'s {@link #accept(EventQueue)}<a name="line.98"></a>
+<span class="sourceLineNo">099</span>   * method<a name="line.99"></a>
 <span class="sourceLineNo">100</span>   *<a name="line.100"></a>
-<span class="sourceLineNo">101</span>   * @param eventQueue the {@link EventQueue} to process; may be<a name="line.101"></a>
-<span class="sourceLineNo">102</span>   * {@code null} in which case no action will be taken<a name="line.102"></a>
-<span class="sourceLineNo">103</span>   *<a name="line.103"></a>
-<span class="sourceLineNo">104</span>   * @see #accept(Event.Type, HasMetadata, HasMetadata)<a name="line.104"></a>
-<span class="sourceLineNo">105</span>   */<a name="line.105"></a>
-<span class="sourceLineNo">106</span>  @Override<a name="line.106"></a>
-<span class="sourceLineNo">107</span>  public final void accept(final EventQueue&lt;? extends T&gt; eventQueue) {<a name="line.107"></a>
-<span class="sourceLineNo">108</span>    if (eventQueue != null) {<a name="line.108"></a>
-<span class="sourceLineNo">109</span>      synchronized (eventQueue) {<a name="line.109"></a>
-<span class="sourceLineNo">110</span>        final Object key = eventQueue.getKey();<a name="line.110"></a>
-<span class="sourceLineNo">111</span>        if (key == null) {<a name="line.111"></a>
-<span class="sourceLineNo">112</span>          throw new IllegalStateException("eventQueue.getKey() == null; eventQueue: " + eventQueue);<a name="line.112"></a>
-<span class="sourceLineNo">113</span>        }        <a name="line.113"></a>
-<span class="sourceLineNo">114</span>        for (final Event&lt;? extends T&gt; event : eventQueue) {<a name="line.114"></a>
-<span class="sourceLineNo">115</span>          if (event != null) {<a name="line.115"></a>
-<span class="sourceLineNo">116</span>            assert key.equals(event.getKey());            <a name="line.116"></a>
-<span class="sourceLineNo">117</span>            final Event.Type eventType = event.getType();<a name="line.117"></a>
-<span class="sourceLineNo">118</span>            assert eventType != null;            <a name="line.118"></a>
-<span class="sourceLineNo">119</span>            final T newResource = event.getResource();<a name="line.119"></a>
-<span class="sourceLineNo">120</span>            if (event.getPriorResource() != null) {<a name="line.120"></a>
-<span class="sourceLineNo">121</span>              // TODO: unexpected state, but should just be ignored or<a name="line.121"></a>
-<span class="sourceLineNo">122</span>              // logged<a name="line.122"></a>
-<span class="sourceLineNo">123</span>            }<a name="line.123"></a>
-<span class="sourceLineNo">124</span>            final T priorResource;<a name="line.124"></a>
-<span class="sourceLineNo">125</span>            final Event.Type newEventType;<a name="line.125"></a>
-<span class="sourceLineNo">126</span>            if (this.knownObjects == null) {<a name="line.126"></a>
-<span class="sourceLineNo">127</span>              priorResource = null;<a name="line.127"></a>
-<span class="sourceLineNo">128</span>              newEventType = eventType;<a name="line.128"></a>
-<span class="sourceLineNo">129</span>            } else {<a name="line.129"></a>
-<span class="sourceLineNo">130</span>              synchronized (this.knownObjects) {<a name="line.130"></a>
-<span class="sourceLineNo">131</span>                priorResource = this.knownObjects.get(key);<a name="line.131"></a>
-<span class="sourceLineNo">132</span>                if (eventType.equals(Event.Type.DELETION)) {<a name="line.132"></a>
-<span class="sourceLineNo">133</span>                  this.knownObjects.remove(key);<a name="line.133"></a>
-<span class="sourceLineNo">134</span>                  newEventType = Event.Type.DELETION;<a name="line.134"></a>
-<span class="sourceLineNo">135</span>                } else {<a name="line.135"></a>
-<span class="sourceLineNo">136</span>                  assert eventType.equals(Event.Type.ADDITION) || eventType.equals(Event.Type.MODIFICATION) || eventType.equals(Event.Type.SYNCHRONIZATION);<a name="line.136"></a>
-<span class="sourceLineNo">137</span>                  this.knownObjects.put(key, newResource);<a name="line.137"></a>
-<span class="sourceLineNo">138</span>                  if (priorResource == null) {<a name="line.138"></a>
-<span class="sourceLineNo">139</span>                    newEventType = Event.Type.ADDITION;<a name="line.139"></a>
-<span class="sourceLineNo">140</span>                  } else if (eventType.equals(Event.Type.SYNCHRONIZATION)) {<a name="line.140"></a>
-<span class="sourceLineNo">141</span>                    newEventType = Event.Type.SYNCHRONIZATION;<a name="line.141"></a>
-<span class="sourceLineNo">142</span>                  } else {<a name="line.142"></a>
-<span class="sourceLineNo">143</span>                    newEventType = Event.Type.MODIFICATION;<a name="line.143"></a>
-<span class="sourceLineNo">144</span>                  }<a name="line.144"></a>
-<span class="sourceLineNo">145</span>                }<a name="line.145"></a>
-<span class="sourceLineNo">146</span>              }<a name="line.146"></a>
-<span class="sourceLineNo">147</span>            }<a name="line.147"></a>
-<span class="sourceLineNo">148</span>            this.accept(newEventType, priorResource, newResource);<a name="line.148"></a>
-<span class="sourceLineNo">149</span>          }<a name="line.149"></a>
-<span class="sourceLineNo">150</span>        }<a name="line.150"></a>
-<span class="sourceLineNo">151</span>      }<a name="line.151"></a>
-<span class="sourceLineNo">152</span>    }<a name="line.152"></a>
-<span class="sourceLineNo">153</span>  }<a name="line.153"></a>
-<span class="sourceLineNo">154</span><a name="line.154"></a>
-<span class="sourceLineNo">155</span>  /**<a name="line.155"></a>
-<span class="sourceLineNo">156</span>   * Called to process the contents of a given {@link Event} from the<a name="line.156"></a>
-<span class="sourceLineNo">157</span>   * {@link EventQueue} supplied to the {@link #accept(EventQueue)}<a name="line.157"></a>
-<span class="sourceLineNo">158</span>   * method, &lt;strong&gt;with that {@link EventQueue}'s monitor<a name="line.158"></a>
-<span class="sourceLineNo">159</span>   * held&lt;/strong&gt;.<a name="line.159"></a>
-<span class="sourceLineNo">160</span>   *<a name="line.160"></a>
-<span class="sourceLineNo">161</span>   * &lt;p&gt;Implementations of this method should be relatively fast as<a name="line.161"></a>
-<span class="sourceLineNo">162</span>   * this method dictates the speed of {@link EventQueue}<a name="line.162"></a>
-<span class="sourceLineNo">163</span>   * processing.&lt;/p&gt;<a name="line.163"></a>
-<span class="sourceLineNo">164</span>   *<a name="line.164"></a>
-<span class="sourceLineNo">165</span>   * @param eventType the {@link Event.Type} describing the event<a name="line.165"></a>
-<span class="sourceLineNo">166</span>   * encountered in the {@link EventQueue}; must not be {@code null}<a name="line.166"></a>
-<span class="sourceLineNo">167</span>   *<a name="line.167"></a>
-<span class="sourceLineNo">168</span>   * @param priorResource the &lt;em&gt;prior state&lt;/em&gt; of the Kubernetes<a name="line.168"></a>
-<span class="sourceLineNo">169</span>   * resource this logical event concerns; may be {@code null}<a name="line.169"></a>
-<span class="sourceLineNo">170</span>   *<a name="line.170"></a>
-<span class="sourceLineNo">171</span>   * @param resource the Kubernetes resource this logical event<a name="line.171"></a>
-<span class="sourceLineNo">172</span>   * concerns; must not be {@code null}<a name="line.172"></a>
-<span class="sourceLineNo">173</span>   *<a name="line.173"></a>
-<span class="sourceLineNo">174</span>   * @exception NullPointerException if {@code eventType} or {@code<a name="line.174"></a>
-<span class="sourceLineNo">175</span>   * resource} is {@code null}<a name="line.175"></a>
-<span class="sourceLineNo">176</span>   *<a name="line.176"></a>
-<span class="sourceLineNo">177</span>   * @see #accept(EventQueue)<a name="line.177"></a>
-<span class="sourceLineNo">178</span>   *<a name="line.178"></a>
-<span class="sourceLineNo">179</span>   * @see Event#Event(Object, Event.Type, HasMetadata, HasMetadata)<a name="line.179"></a>
-<span class="sourceLineNo">180</span>   */<a name="line.180"></a>
-<span class="sourceLineNo">181</span>  protected abstract void accept(final Event.Type eventType, final T priorResource, final T resource);<a name="line.181"></a>
-<span class="sourceLineNo">182</span>  <a name="line.182"></a>
-<span class="sourceLineNo">183</span>}<a name="line.183"></a>
+<span class="sourceLineNo">101</span>   * @see #accept(EventQueue)<a name="line.101"></a>
+<span class="sourceLineNo">102</span>   */<a name="line.102"></a>
+<span class="sourceLineNo">103</span>  protected ResourceTrackingEventQueueConsumer(final Map&lt;Object, T&gt; knownObjects) {<a name="line.103"></a>
+<span class="sourceLineNo">104</span>    super();<a name="line.104"></a>
+<span class="sourceLineNo">105</span>    this.logger = this.createLogger();<a name="line.105"></a>
+<span class="sourceLineNo">106</span>    if (this.logger == null) {<a name="line.106"></a>
+<span class="sourceLineNo">107</span>      throw new IllegalStateException("createLogger() == null");<a name="line.107"></a>
+<span class="sourceLineNo">108</span>    }<a name="line.108"></a>
+<span class="sourceLineNo">109</span>    final String cn = this.getClass().getName();<a name="line.109"></a>
+<span class="sourceLineNo">110</span>    final String mn = "&lt;init&gt;";<a name="line.110"></a>
+<span class="sourceLineNo">111</span>    if (this.logger.isLoggable(Level.FINER)) {<a name="line.111"></a>
+<span class="sourceLineNo">112</span>      final String knownObjectsString;<a name="line.112"></a>
+<span class="sourceLineNo">113</span>      if (knownObjects == null) {<a name="line.113"></a>
+<span class="sourceLineNo">114</span>        knownObjectsString = null;<a name="line.114"></a>
+<span class="sourceLineNo">115</span>      } else {<a name="line.115"></a>
+<span class="sourceLineNo">116</span>        synchronized (knownObjects) {<a name="line.116"></a>
+<span class="sourceLineNo">117</span>          knownObjectsString = knownObjects.toString();<a name="line.117"></a>
+<span class="sourceLineNo">118</span>        }<a name="line.118"></a>
+<span class="sourceLineNo">119</span>      }      <a name="line.119"></a>
+<span class="sourceLineNo">120</span>      this.logger.entering(cn, mn, knownObjectsString);<a name="line.120"></a>
+<span class="sourceLineNo">121</span>    }<a name="line.121"></a>
+<span class="sourceLineNo">122</span>    this.knownObjects = knownObjects;<a name="line.122"></a>
+<span class="sourceLineNo">123</span>    if (this.logger.isLoggable(Level.FINER)) {<a name="line.123"></a>
+<span class="sourceLineNo">124</span>      this.logger.exiting(cn, mn);<a name="line.124"></a>
+<span class="sourceLineNo">125</span>    }<a name="line.125"></a>
+<span class="sourceLineNo">126</span>  }<a name="line.126"></a>
+<span class="sourceLineNo">127</span><a name="line.127"></a>
+<span class="sourceLineNo">128</span><a name="line.128"></a>
+<span class="sourceLineNo">129</span>  /*<a name="line.129"></a>
+<span class="sourceLineNo">130</span>   * Instance methods.<a name="line.130"></a>
+<span class="sourceLineNo">131</span>   */<a name="line.131"></a>
+<span class="sourceLineNo">132</span><a name="line.132"></a>
+<span class="sourceLineNo">133</span><a name="line.133"></a>
+<span class="sourceLineNo">134</span>  /**<a name="line.134"></a>
+<span class="sourceLineNo">135</span>   * Returns a {@link Logger} for use with this {@link<a name="line.135"></a>
+<span class="sourceLineNo">136</span>   * ResourceTrackingEventQueueConsumer}.<a name="line.136"></a>
+<span class="sourceLineNo">137</span>   *<a name="line.137"></a>
+<span class="sourceLineNo">138</span>   * &lt;p&gt;This method never returns {@code null}.&lt;/p&gt;<a name="line.138"></a>
+<span class="sourceLineNo">139</span>   *<a name="line.139"></a>
+<span class="sourceLineNo">140</span>   * &lt;p&gt;Overrides of this method must not return {@code null}.&lt;/p&gt;<a name="line.140"></a>
+<span class="sourceLineNo">141</span>   *<a name="line.141"></a>
+<span class="sourceLineNo">142</span>   * @return a non-{@code null} {@link Logger}<a name="line.142"></a>
+<span class="sourceLineNo">143</span>   */<a name="line.143"></a>
+<span class="sourceLineNo">144</span>  protected Logger createLogger() {<a name="line.144"></a>
+<span class="sourceLineNo">145</span>    return Logger.getLogger(this.getClass().getName());<a name="line.145"></a>
+<span class="sourceLineNo">146</span>  }<a name="line.146"></a>
+<span class="sourceLineNo">147</span><a name="line.147"></a>
+<span class="sourceLineNo">148</span>  <a name="line.148"></a>
+<span class="sourceLineNo">149</span>  /**<a name="line.149"></a>
+<span class="sourceLineNo">150</span>   * {@linkplain EventQueue#iterator() Loops through} all the {@link<a name="line.150"></a>
+<span class="sourceLineNo">151</span>   * Event}s in the supplied {@link EventQueue}, keeping track of the<a name="line.151"></a>
+<span class="sourceLineNo">152</span>   * {@link HasMetadata} it concerns along the way by<a name="line.152"></a>
+<span class="sourceLineNo">153</span>   * &lt;strong&gt;synchronizing on&lt;/strong&gt; and writing to the {@link Map}<a name="line.153"></a>
+<span class="sourceLineNo">154</span>   * {@linkplain #ResourceTrackingEventQueueConsumer(Map) supplied at<a name="line.154"></a>
+<span class="sourceLineNo">155</span>   * construction time}.<a name="line.155"></a>
+<span class="sourceLineNo">156</span>   *<a name="line.156"></a>
+<span class="sourceLineNo">157</span>   * &lt;p&gt;Individual {@link Event}s are forwarded on to the {@link<a name="line.157"></a>
+<span class="sourceLineNo">158</span>   * #accept(Event.Type, HasMetadata, HasMetadata)} method.&lt;/p&gt;<a name="line.158"></a>
+<span class="sourceLineNo">159</span>   *<a name="line.159"></a>
+<span class="sourceLineNo">160</span>   * @param eventQueue the {@link EventQueue} to process; may be<a name="line.160"></a>
+<span class="sourceLineNo">161</span>   * {@code null} in which case no action will be taken<a name="line.161"></a>
+<span class="sourceLineNo">162</span>   *<a name="line.162"></a>
+<span class="sourceLineNo">163</span>   * @see #accept(Event.Type, HasMetadata, HasMetadata)<a name="line.163"></a>
+<span class="sourceLineNo">164</span>   */<a name="line.164"></a>
+<span class="sourceLineNo">165</span>  @Override<a name="line.165"></a>
+<span class="sourceLineNo">166</span>  public final void accept(final EventQueue&lt;? extends T&gt; eventQueue) {<a name="line.166"></a>
+<span class="sourceLineNo">167</span>    final String cn = this.getClass().getName();<a name="line.167"></a>
+<span class="sourceLineNo">168</span>    final String mn = "accept";<a name="line.168"></a>
+<span class="sourceLineNo">169</span>    if (eventQueue == null) {<a name="line.169"></a>
+<span class="sourceLineNo">170</span>      if (this.logger.isLoggable(Level.FINER)) {<a name="line.170"></a>
+<span class="sourceLineNo">171</span>        this.logger.entering(cn, mn, null);<a name="line.171"></a>
+<span class="sourceLineNo">172</span>      }<a name="line.172"></a>
+<span class="sourceLineNo">173</span>    } else {<a name="line.173"></a>
+<span class="sourceLineNo">174</span>      synchronized (eventQueue) {<a name="line.174"></a>
+<span class="sourceLineNo">175</span>        if (this.logger.isLoggable(Level.FINER)) {<a name="line.175"></a>
+<span class="sourceLineNo">176</span>          this.logger.entering(cn, mn, eventQueue);<a name="line.176"></a>
+<span class="sourceLineNo">177</span>        }<a name="line.177"></a>
+<span class="sourceLineNo">178</span>        final Object key = eventQueue.getKey();<a name="line.178"></a>
+<span class="sourceLineNo">179</span>        if (key == null) {<a name="line.179"></a>
+<span class="sourceLineNo">180</span>          throw new IllegalStateException("eventQueue.getKey() == null; eventQueue: " + eventQueue);<a name="line.180"></a>
+<span class="sourceLineNo">181</span>        }        <a name="line.181"></a>
+<span class="sourceLineNo">182</span>        for (final Event&lt;? extends T&gt; event : eventQueue) {<a name="line.182"></a>
+<span class="sourceLineNo">183</span>          if (event != null) {<a name="line.183"></a>
+<span class="sourceLineNo">184</span>            assert key.equals(event.getKey());            <a name="line.184"></a>
+<span class="sourceLineNo">185</span>            final Event.Type eventType = event.getType();<a name="line.185"></a>
+<span class="sourceLineNo">186</span>            assert eventType != null;            <a name="line.186"></a>
+<span class="sourceLineNo">187</span>            final T newResource = event.getResource();<a name="line.187"></a>
+<span class="sourceLineNo">188</span>            if (event.getPriorResource() != null) {<a name="line.188"></a>
+<span class="sourceLineNo">189</span>              // TODO: unexpected state, but should just be ignored or<a name="line.189"></a>
+<span class="sourceLineNo">190</span>              // logged<a name="line.190"></a>
+<span class="sourceLineNo">191</span>            }<a name="line.191"></a>
+<span class="sourceLineNo">192</span>            final T priorResource;<a name="line.192"></a>
+<span class="sourceLineNo">193</span>            final Event.Type newEventType;<a name="line.193"></a>
+<span class="sourceLineNo">194</span>            if (this.knownObjects == null) {<a name="line.194"></a>
+<span class="sourceLineNo">195</span>              priorResource = null;<a name="line.195"></a>
+<span class="sourceLineNo">196</span>              newEventType = eventType;<a name="line.196"></a>
+<span class="sourceLineNo">197</span>            } else {<a name="line.197"></a>
+<span class="sourceLineNo">198</span>              synchronized (this.knownObjects) {<a name="line.198"></a>
+<span class="sourceLineNo">199</span>                priorResource = this.knownObjects.get(key);<a name="line.199"></a>
+<span class="sourceLineNo">200</span>                if (eventType.equals(Event.Type.DELETION)) {<a name="line.200"></a>
+<span class="sourceLineNo">201</span>                  this.knownObjects.remove(key);<a name="line.201"></a>
+<span class="sourceLineNo">202</span>                  newEventType = Event.Type.DELETION;<a name="line.202"></a>
+<span class="sourceLineNo">203</span>                } else {<a name="line.203"></a>
+<span class="sourceLineNo">204</span>                  assert eventType.equals(Event.Type.ADDITION) || eventType.equals(Event.Type.MODIFICATION) || eventType.equals(Event.Type.SYNCHRONIZATION);<a name="line.204"></a>
+<span class="sourceLineNo">205</span>                  this.knownObjects.put(key, newResource);<a name="line.205"></a>
+<span class="sourceLineNo">206</span>                  if (priorResource == null) {<a name="line.206"></a>
+<span class="sourceLineNo">207</span>                    newEventType = Event.Type.ADDITION;<a name="line.207"></a>
+<span class="sourceLineNo">208</span>                  } else if (eventType.equals(Event.Type.SYNCHRONIZATION)) {<a name="line.208"></a>
+<span class="sourceLineNo">209</span>                    newEventType = Event.Type.SYNCHRONIZATION;<a name="line.209"></a>
+<span class="sourceLineNo">210</span>                  } else {<a name="line.210"></a>
+<span class="sourceLineNo">211</span>                    newEventType = Event.Type.MODIFICATION;<a name="line.211"></a>
+<span class="sourceLineNo">212</span>                  }<a name="line.212"></a>
+<span class="sourceLineNo">213</span>                }<a name="line.213"></a>
+<span class="sourceLineNo">214</span>              }<a name="line.214"></a>
+<span class="sourceLineNo">215</span>            }<a name="line.215"></a>
+<span class="sourceLineNo">216</span>            this.accept(newEventType, priorResource, newResource);<a name="line.216"></a>
+<span class="sourceLineNo">217</span>          }<a name="line.217"></a>
+<span class="sourceLineNo">218</span>        }<a name="line.218"></a>
+<span class="sourceLineNo">219</span>      }<a name="line.219"></a>
+<span class="sourceLineNo">220</span>    }<a name="line.220"></a>
+<span class="sourceLineNo">221</span>    if (this.logger.isLoggable(Level.FINER)) {<a name="line.221"></a>
+<span class="sourceLineNo">222</span>      this.logger.exiting(cn, mn);<a name="line.222"></a>
+<span class="sourceLineNo">223</span>    }<a name="line.223"></a>
+<span class="sourceLineNo">224</span>  }<a name="line.224"></a>
+<span class="sourceLineNo">225</span><a name="line.225"></a>
+<span class="sourceLineNo">226</span>  /**<a name="line.226"></a>
+<span class="sourceLineNo">227</span>   * Called to process the contents of a given {@link Event} from the<a name="line.227"></a>
+<span class="sourceLineNo">228</span>   * {@link EventQueue} supplied to the {@link #accept(EventQueue)}<a name="line.228"></a>
+<span class="sourceLineNo">229</span>   * method, &lt;strong&gt;with that {@link EventQueue}'s monitor<a name="line.229"></a>
+<span class="sourceLineNo">230</span>   * held&lt;/strong&gt;.<a name="line.230"></a>
+<span class="sourceLineNo">231</span>   *<a name="line.231"></a>
+<span class="sourceLineNo">232</span>   * &lt;p&gt;Implementations of this method should be relatively fast as<a name="line.232"></a>
+<span class="sourceLineNo">233</span>   * this method dictates the speed of {@link EventQueue}<a name="line.233"></a>
+<span class="sourceLineNo">234</span>   * processing.&lt;/p&gt;<a name="line.234"></a>
+<span class="sourceLineNo">235</span>   *<a name="line.235"></a>
+<span class="sourceLineNo">236</span>   * @param eventType the {@link Event.Type} describing the event<a name="line.236"></a>
+<span class="sourceLineNo">237</span>   * encountered in the {@link EventQueue}; must not be {@code null}<a name="line.237"></a>
+<span class="sourceLineNo">238</span>   *<a name="line.238"></a>
+<span class="sourceLineNo">239</span>   * @param priorResource the &lt;em&gt;prior state&lt;/em&gt; of the Kubernetes<a name="line.239"></a>
+<span class="sourceLineNo">240</span>   * resource this logical event concerns; may be {@code null}<a name="line.240"></a>
+<span class="sourceLineNo">241</span>   *<a name="line.241"></a>
+<span class="sourceLineNo">242</span>   * @param resource the Kubernetes resource this logical event<a name="line.242"></a>
+<span class="sourceLineNo">243</span>   * concerns; must not be {@code null}<a name="line.243"></a>
+<span class="sourceLineNo">244</span>   *<a name="line.244"></a>
+<span class="sourceLineNo">245</span>   * @exception NullPointerException if {@code eventType} or {@code<a name="line.245"></a>
+<span class="sourceLineNo">246</span>   * resource} is {@code null}<a name="line.246"></a>
+<span class="sourceLineNo">247</span>   *<a name="line.247"></a>
+<span class="sourceLineNo">248</span>   * @see #accept(EventQueue)<a name="line.248"></a>
+<span class="sourceLineNo">249</span>   *<a name="line.249"></a>
+<span class="sourceLineNo">250</span>   * @see Event#Event(Object, Event.Type, HasMetadata, HasMetadata)<a name="line.250"></a>
+<span class="sourceLineNo">251</span>   */<a name="line.251"></a>
+<span class="sourceLineNo">252</span>  protected abstract void accept(final Event.Type eventType, final T priorResource, final T resource);<a name="line.252"></a>
+<span class="sourceLineNo">253</span>  <a name="line.253"></a>
+<span class="sourceLineNo">254</span>}<a name="line.254"></a>
 
 
 
