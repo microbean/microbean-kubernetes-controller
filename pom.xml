@@ -66,13 +66,6 @@
         <version>1.7.25</version>
         <type>jar</type>
       </dependency>
-
-      <dependency>
-        <groupId>org.yaml</groupId>
-        <artifactId>snakeyaml</artifactId>
-        <version>1.19</version>
-        <type>jar</type>
-      </dependency>
       
     </dependencies>
   </dependencyManagement>
@@ -98,13 +91,6 @@
     <dependency>
       <groupId>org.microbean</groupId>
       <artifactId>microbean-development-annotations</artifactId>
-      <type>jar</type>
-      <scope>compile</scope>
-    </dependency>
-
-    <dependency>
-      <groupId>org.yaml</groupId>
-      <artifactId>snakeyaml</artifactId>
       <type>jar</type>
       <scope>compile</scope>
     </dependency>
@@ -137,14 +123,6 @@
   </dependencies>
   
   <build>
-
-    <extensions>
-      <extension>
-        <groupId>kr.motd.maven</groupId>
-        <artifactId>os-maven-plugin</artifactId>
-        <version>1.5.0.Final</version>
-      </extension>
-    </extensions>
 
     <resources>
 
@@ -194,12 +172,6 @@
           <version>3.0.4</version>
         </plugin>
         
-        <plugin>
-          <groupId>org.jboss.jandex</groupId>
-          <artifactId>jandex-maven-plugin</artifactId>
-          <version>1.0.5</version>
-        </plugin>
-
       </plugins>
     </pluginManagement>
     
@@ -252,11 +224,6 @@
     <plugins>
       <plugin>
         <artifactId>maven-javadoc-plugin</artifactId>
-        <!--
-        <configuration>
-          <doclint>-missing</doclint>
-        </configuration>
-        -->
       </plugin>
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
