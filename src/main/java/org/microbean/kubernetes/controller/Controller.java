@@ -129,20 +129,101 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * Constructors.
    */
 
-  
+
+  /**
+   * Creates a new {@link Controller} but does not {@linkplain
+   * #start() start it}.
+   *
+   * @param <X> a {@link Listable} and {@link VersionWatchable} that
+   * will be used by the embedded {@link Reflector}; must not be
+   * {@code null}
+   *
+   * @param operation a {@link Listable} and a {@link
+   * VersionWatchable} that produces Kubernetes events; must not be
+   * {@code null}
+   *
+   * @param siphon the {@link Consumer} that will process each {@link
+   * EventQueue} as it becomes ready; must not be {@code null}
+   *
+   * @exception NullPointerException if {@code operation} or {@code
+   * siphon} is {@code null}
+   *
+   * @see #Controller(Listable, ScheduledExecutorService, Duration,
+   * Map, Consumer)
+   *
+   * @see #start()
+   */
   @SuppressWarnings("rawtypes")
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Controller(final X operation,
                                                                                                                                final Consumer<? super EventQueue<? extends T>> siphon) {
     this(operation, null, null, null, siphon);
   }
-  
+
+  /**
+   * Creates a new {@link Controller} but does not {@linkplain
+   * #start() start it}.
+   *
+   * @param <X> a {@link Listable} and {@link VersionWatchable} that
+   * will be used by the embedded {@link Reflector}; must not be
+   * {@code null}
+   *
+   * @param operation a {@link Listable} and a {@link
+   * VersionWatchable} that produces Kubernetes events; must not be
+   * {@code null}
+   *
+   * @param knownObjects a {@link Map} containing the last known state
+   * of Kubernetes resources the embedded {@link EventQueueCollection}
+   * is caching events for; may be {@code null} if this {@link
+   * Controller} is not interested in tracking deletions of objects;
+   * if non-{@code null} <strong>will be synchronized on by this
+   * class</strong> during retrieval and traversal operations
+   *
+   * @param siphon the {@link Consumer} that will process each {@link
+   * EventQueue} as it becomes ready; must not be {@code null}
+   *
+   * @exception NullPointerException if {@code operation} or {@code
+   * siphon} is {@code null}
+   *
+   * @see #Controller(Listable, ScheduledExecutorService, Duration,
+   * Map, Consumer)
+   *
+   * @see #start()
+   */
   @SuppressWarnings("rawtypes")
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Controller(final X operation,
                                                                                                                                final Map<Object, T> knownObjects,
                                                                                                                                final Consumer<? super EventQueue<? extends T>> siphon) {
     this(operation, null, null, knownObjects, siphon);
   }
-  
+
+  /**
+   * Creates a new {@link Controller} but does not {@linkplain
+   * #start() start it}.
+   *
+   * @param <X> a {@link Listable} and {@link VersionWatchable} that
+   * will be used by the embedded {@link Reflector}; must not be
+   * {@code null}
+   *
+   * @param operation a {@link Listable} and a {@link
+   * VersionWatchable} that produces Kubernetes events; must not be
+   * {@code null}
+   *
+   * @param synchronizationInterval a {@link Duration} representing
+   * the time in between one {@linkplain EventCache#synchronize()
+   * synchronization operation} and another; may be {@code null} in
+   * which case no synchronization will occur
+   *
+   * @param siphon the {@link Consumer} that will process each {@link
+   * EventQueue} as it becomes ready; must not be {@code null}
+   *
+   * @exception NullPointerException if {@code operation} or {@code
+   * siphon} is {@code null}
+   *
+   * @see #Controller(Listable, ScheduledExecutorService, Duration,
+   * Map, Consumer)
+   *
+   * @see #start()
+   */
   @SuppressWarnings("rawtypes")
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Controller(final X operation,
                                                                                                                                final Duration synchronizationInterval,
@@ -150,6 +231,41 @@ public class Controller<T extends HasMetadata> implements Closeable {
     this(operation, null, synchronizationInterval, null, siphon);
   }
 
+  /**
+   * Creates a new {@link Controller} but does not {@linkplain
+   * #start() start it}.
+   *
+   * @param <X> a {@link Listable} and {@link VersionWatchable} that
+   * will be used by the embedded {@link Reflector}; must not be
+   * {@code null}
+   *
+   * @param operation a {@link Listable} and a {@link
+   * VersionWatchable} that produces Kubernetes events; must not be
+   * {@code null}
+   *
+   * @param synchronizationInterval a {@link Duration} representing
+   * the time in between one {@linkplain EventCache#synchronize()
+   * synchronization operation} and another; may be {@code null} in
+   * which case no synchronization will occur
+   *
+   * @param knownObjects a {@link Map} containing the last known state
+   * of Kubernetes resources the embedded {@link EventQueueCollection}
+   * is caching events for; may be {@code null} if this {@link
+   * Controller} is not interested in tracking deletions of objects;
+   * if non-{@code null} <strong>will be synchronized on by this
+   * class</strong> during retrieval and traversal operations
+   *
+   * @param siphon the {@link Consumer} that will process each {@link
+   * EventQueue} as it becomes ready; must not be {@code null}
+   *
+   * @exception NullPointerException if {@code operation} or {@code
+   * siphon} is {@code null}
+   *
+   * @see #Controller(Listable, ScheduledExecutorService, Duration,
+   * Map, Consumer)
+   *
+   * @see #start()
+   */
   @SuppressWarnings("rawtypes")
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Controller(final X operation,
                                                                                                                                final Duration synchronizationInterval,

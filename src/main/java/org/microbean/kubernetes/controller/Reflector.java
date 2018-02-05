@@ -118,7 +118,14 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   @GuardedBy("itself")
   private final EventCache<T> eventCache;
 
-  private final Logger logger;
+  /**
+   * A {@link Logger} for use by this {@link Reflector}.
+   *
+   * <p>This field is never {@code null}.</p>
+   *
+   * @see #createLogger()
+   */
+  protected final Logger logger;
   
 
   /*
@@ -343,15 +350,10 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         
       if (seconds > 0L) {
         final ScheduledFuture<?> job = this.synchronizationExecutorService.scheduleWithFixedDelay(() -> {
-            try {
-              if (shouldSynchronize()) {
-                synchronized (eventCache) {
-                  eventCache.synchronize();
-                }
+            if (shouldSynchronize()) {
+              synchronized (eventCache) {
+                eventCache.synchronize();
               }
-            } catch (final RuntimeException runtimeException) {
-              // TODO: log or...?
-              throw runtimeException;
             }
           }, 0L, seconds, TimeUnit.SECONDS);
         assert job != null;
@@ -515,6 +517,12 @@ public class Reflector<T extends HasMetadata> implements Closeable {
      */
     private WatchHandler() {
       super();
+      final String cn = this.getClass().getName();
+      final String mn = "<init>";
+      if (logger.isLoggable(Level.FINER)) {
+        logger.entering(cn, mn);
+        logger.exiting(cn, mn);
+      }
     }
 
 
@@ -568,7 +576,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         eventType = Event.Type.DELETION;
         break;
       case ERROR:        
-        // TODO: Uh...the Go code has:
+        // Uh...the Go code has:
         //
         //   if event.Type == watch.Error {
 				//     return apierrs.FromObject(event.Object)
@@ -630,7 +638,17 @@ public class Reflector<T extends HasMetadata> implements Closeable {
      */
     @Override
     public final void onClose(final KubernetesClientException exception) {
-      // Note that exception can be null.
+      final String cn = this.getClass().getName();
+      final String mn = "onClose";
+      if (logger.isLoggable(Level.FINER)) {
+        logger.entering(cn, mn, exception);
+      }
+      if (exception != null && logger.isLoggable(Level.WARNING)) {
+        logger.logp(Level.WARNING, cn, mn, exception.getMessage(), exception);
+      }
+      if (logger.isLoggable(Level.FINER)) {
+        logger.exiting(cn, mn, exception);
+      }      
     }
     
   }
