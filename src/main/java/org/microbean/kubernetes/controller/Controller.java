@@ -16,6 +16,9 @@
  */
 package org.microbean.kubernetes.controller;
 
+import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
+
 import java.io.Closeable;
 import java.io.IOException;
 
@@ -124,7 +127,19 @@ public class Controller<T extends HasMetadata> implements Closeable {
    */
   private final Consumer<? super EventQueue<? extends T>> siphon;
 
+  /**
+   * A {@link PropertyChangeListener} that listens for changes to the
+   * bound property named {@code synchronized} of this {@link
+   * Controller}'s associated {@link EventQueueCollection}
+   *
+   * <p>This field is never {@code null}.</p>
+   *
+   * @see EventQueueCollection#addPropertyChangeListener(String,
+   * PropertyChangeListener)
+   */
+  private final PropertyChangeListener synchronizedListener;
 
+  
   /*
    * Constructors.
    */
@@ -319,7 +334,8 @@ public class Controller<T extends HasMetadata> implements Closeable {
                                                                                                                                final Consumer<? super EventQueue<? extends T>> siphon) {
     super();
     this.siphon = Objects.requireNonNull(siphon);
-    this.eventCache = new ControllerEventQueueCollection(knownObjects);
+    this.eventCache = new ControllerEventQueueCollection(knownObjects);    
+    this.synchronizedListener = new SynchronizedListener();
     this.reflector = new ControllerReflector(operation, synchronizationExecutorService, synchronizationInterval);
   }
 
@@ -341,7 +357,7 @@ public class Controller<T extends HasMetadata> implements Closeable {
    */
   @NonBlocking
   public final void start() {
-    this.eventCache.start(siphon);
+    this.eventCache.addPropertyChangeListener("synchronized", this.synchronizedListener);
     this.reflector.start();
   }
 
@@ -361,13 +377,23 @@ public class Controller<T extends HasMetadata> implements Closeable {
    */
   @Override
   public final void close() throws IOException {
-    Exception throwMe = null;
+    Exception throwMe = null;    
     try {
       this.reflector.close();
     } catch (final Exception everything) {
       throwMe = everything;
     }
 
+    try {
+      this.eventCache.removePropertyChangeListener("synchronized", this.synchronizedListener);
+    } catch (final RuntimeException runtimeException) {
+      if (throwMe == null) {
+        throwMe = runtimeException;
+      } else {
+        throwMe.addSuppressed(runtimeException);
+      }
+    }
+    
     try {
       this.eventCache.close();
     } catch (final RuntimeException runtimeException) {
@@ -574,6 +600,62 @@ public class Controller<T extends HasMetadata> implements Closeable {
     protected final void onClose() {
       Controller.this.onClose();
     }
+  }
+
+  /**
+   * A {@link PropertyChangeListener} that listens for changes to the
+   * bound property named {@code synchronized} belonging to the value
+   * of the {@link Controller#eventCache} field.
+   *
+   * @author <a href="https://about.me/lairdnelson"
+   * target="_parent">Laird Nelson</a>
+   *
+   * @see EventQueueCollection#addPropertyChangeListener(String,
+   * PropertyChangeListener)
+   *
+   * @see EventQueueCollection#isSynchronized()
+   */
+  private final class SynchronizedListener implements PropertyChangeListener {
+
+
+    /*
+     * Constructors.
+     */
+
+
+    /**
+     * Creates a new {@link SynchronizedListener}.
+     */
+    private SynchronizedListener() {
+      super();
+    }
+
+    /**
+     * If the supplied {@code event} is non-{@code null} and describes
+     * a change to the {@code synchronized} bound property of an
+     * {@link EventQueueCollection} that results in its being {@code
+     * true}, calls the {@link EventQueueCollection#start(Consumer)}
+     * method on the {@link Consumer} that was supplied to the
+     * enclosing {@link Controller}'s constructor.
+     *
+     * @param event a {@link PropertyChangeEvent}; may be {@code null}
+     *
+     * @see EventQueueCollection#start(Consumer)
+     *
+     * @see EventQueueCollection#isSynchronized()
+     *
+     * @see EventQueueCollection#addPropertyChangeListener(String,
+     * PropertyChangeListener)
+     */
+    @Override
+    public final void propertyChange(final PropertyChangeEvent event) {
+      if (event != null && "synchronized".equals(event.getPropertyName())) {
+        if (Boolean.TRUE.equals(event.getNewValue()) && !Boolean.TRUE.equals(event.getOldValue())) {
+          eventCache.start(siphon);
+        }
+      }
+    }
+    
   }
   
 }

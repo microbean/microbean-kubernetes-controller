@@ -16,6 +16,10 @@
  */
 package org.microbean.kubernetes.controller;
 
+import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
+import java.beans.PropertyChangeSupport;
+
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -80,6 +84,17 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    */
 
 
+  /**
+   * A {@link PropertyChangeSupport} object that manages {@link
+   * PropertyChangeEvent}s on behalf of this {@link
+   * EventQueueCollection}.
+   *
+   * <p>This field is never {@code null}.</p>
+   *
+   * @see #addPropertyChangeListener(String, PropertyChangeListener)
+   */
+  private final PropertyChangeSupport propertyChangeSupport;
+  
   /**
    * Whether this {@link EventQueueCollection} is in the process of
    * {@linkplain #close() closing}.
@@ -243,6 +258,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       }
       this.logger.entering(cn, mn, new Object[] { knownObjectsString, Integer.valueOf(initialCapacity), Float.valueOf(loadFactor) });
     }
+    this.propertyChangeSupport = new PropertyChangeSupport(this);
     this.map = new LinkedHashMap<>(initialCapacity, loadFactor);
     this.knownObjects = knownObjects;
     if (this.logger.isLoggable(Level.FINER)) {
@@ -446,7 +462,8 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       }
       this.logger.entering(cn, mn, new Object[] { incomingResourcesString, resourceVersion });
     }
-    
+
+    final boolean oldSynchronized = this.isSynchronized();
     final int size;
     final Set<Object> replacementKeys;
 
@@ -558,7 +575,15 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       
     if (!this.populated) {
       this.populated = true;
+      this.firePropertyChange("populated", false, true);
+      assert size >= 0;
+      assert queuedDeletions >= 0;
+      final int oldInitialPopulationCount = this.initialPopulationCount;
       this.initialPopulationCount = size + queuedDeletions;
+      this.firePropertyChange("initialPopulationCount", oldInitialPopulationCount, this.initialPopulationCount);
+      if (this.initialPopulationCount == 0) {
+        this.firePropertyChange("synchronized", oldSynchronized, true);
+      }
     }
 
     if (this.logger.isLoggable(Level.FINER)) {
@@ -784,7 +809,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
-    
+
     while (!this.closing && this.isEmpty()) {
       try {
         this.wait();
@@ -795,6 +820,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         Thread.currentThread().interrupt();
       }
     }
+    assert this.populated : "this.populated == false";
     final EventQueue<T> returnValue;
     if (this.closing) {
       returnValue = null;
@@ -807,18 +833,25 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       assert returnValue != null;
       iterator.remove();
       if (this.initialPopulationCount > 0) {
+        // We know we're not populated and our initialPopulationCount
+        // is not 0, so therefore we are not synchronized.
+        assert !this.isSynchronized();
+        final int oldInitialPopulationCount = this.initialPopulationCount;
         this.initialPopulationCount--;
+        this.firePropertyChange("initialPopulationCount", oldInitialPopulationCount, this.initialPopulationCount);
+        if (this.isSynchronized()) {
+          this.firePropertyChange("synchronized", false, true);
+        }
       }
-      Thread.interrupted(); // clear any interrupted status now that we know we're going to be successful
-    }
-
+    }      
+    
     if (this.logger.isLoggable(Level.FINER)) {
       final String eventQueueString;
       synchronized (returnValue) {
         eventQueueString = returnValue.toString();
       }
       this.logger.exiting(cn, mn, eventQueueString);
-    }    
+    }
     return returnValue;
   }
 
@@ -998,7 +1031,9 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     EventQueue<T> eventQueue;
     synchronized (this) {
       if (populate) {
+        final boolean old = this.populated;
         this.populated = true;
+        this.firePropertyChange("populated", old, true);
       }
       eventQueue = this.map.get(key);
       final boolean eventQueueExisted = eventQueue != null;
@@ -1032,6 +1067,219 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     return returnValue;
   }
 
+  
+  /*
+   * PropertyChangeListener support.
+   */
+
+
+  /**
+   * Adds the supplied {@link PropertyChangeListener} to this {@link
+   * EventQueueCollection}'s collection of such listeners so that it
+   * will be notified only when the bound property bearing the
+   * supplied {@code name} changes.
+   *
+   * @param name the name of the bound property whose changes are of
+   * interest; may be {@code null} in which case all property change
+   * notifications will be dispatched to the supplied {@link
+   * PropertyChangeListener}
+   *
+   * @param listener the {@link PropertyChangeListener} to add; may be
+   * {@code null} in which case no action will be taken
+   *
+   * @see #addPropertyChangeListener(PropertyChangeListener)
+   */
+  public final void addPropertyChangeListener(final String name, final PropertyChangeListener listener) {
+    if (listener != null) {
+      this.propertyChangeSupport.addPropertyChangeListener(name, listener);
+    }
+  }
+
+  /**
+   * Adds the supplied {@link PropertyChangeListener} to this {@link
+   * EventQueueCollection}'s collection of such listeners so that it
+   * will be notified whenever any bound property of this {@link
+   * EventQueueCollection} changes.
+   *
+   * @param listener the {@link PropertyChangeListener} to add; may be
+   * {@code null} in which case no action will be taken
+   *
+   * @see #addPropertyChangeListener(String, PropertyChangeListener)
+   */
+  public final void addPropertyChangeListener(final PropertyChangeListener listener) {
+    if (listener != null) {
+      this.propertyChangeSupport.addPropertyChangeListener(listener);
+    }
+  }
+
+  /**
+   * Removes the supplied {@link PropertyChangeListener} from this
+   * {@link EventQueueCollection} so that it will no longer be
+   * notified of changes to bound properties bearing the supplied
+   * {@code name}.
+   *
+   * @param name a bound property name; may be {@code null}
+   *
+   * @param listener the {@link PropertyChangeListener} to remove; may
+   * be {@code null} in which case no action will be taken
+   *
+   * @see #addPropertyChangeListener(String, PropertyChangeListener)
+   *
+   * @see #removePropertyChangeListener(PropertyChangeListener)
+   */
+  public final void removePropertyChangeListener(final String name, final PropertyChangeListener listener) {
+    if (listener != null) {
+      this.propertyChangeSupport.removePropertyChangeListener(name, listener);
+    }
+  }
+
+  /**
+   * Removes the supplied {@link PropertyChangeListener} from this
+   * {@link EventQueueCollection} so that it will no longer be
+   * notified of any changes to bound properties.
+   *
+   * @param listener the {@link PropertyChangeListener} to remove; may
+   * be {@code null} in which case no action will be taken
+   *
+   * @see #addPropertyChangeListener(PropertyChangeListener)
+   *
+   * @see #removePropertyChangeListener(String, PropertyChangeListener)
+   */
+  public final void removePropertyChangeListener(final PropertyChangeListener listener) {
+    if (listener != null) {
+      this.propertyChangeSupport.removePropertyChangeListener(listener);
+    }
+  }
+
+  /**
+   * Returns an array of {@link PropertyChangeListener}s that were
+   * {@linkplain #addPropertyChangeListener(String,
+   * PropertyChangeListener) registered} to receive notifications for
+   * changes to bound properties bearing the supplied {@code name}.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * @param name the name of a bound property; may be {@code null} in
+   * which case an empty array will be returned
+   *
+   * @return a non-{@code null} array of {@link
+   * PropertyChangeListener}s
+   *
+   * @see #getPropertyChangeListeners()
+   *
+   * @see #addPropertyChangeListener(String, PropertyChangeListener)
+   *
+   * @see #removePropertyChangeListener(String,
+   * PropertyChangeListener)
+   */
+  public final PropertyChangeListener[] getPropertyChangeListeners(final String name) {
+    return this.propertyChangeSupport.getPropertyChangeListeners(name);
+  }
+
+  /**
+   * Returns an array of {@link PropertyChangeListener}s that were
+   * {@linkplain #addPropertyChangeListener(String,
+   * PropertyChangeListener) registered} to receive notifications for
+   * changes to all bound properties.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * @return a non-{@code null} array of {@link
+   * PropertyChangeListener}s
+   *
+   * @see #getPropertyChangeListeners(String)
+   *
+   * @see #addPropertyChangeListener(PropertyChangeListener)
+   *
+   * @see #removePropertyChangeListener(PropertyChangeListener)
+   */
+  public final PropertyChangeListener[] getPropertyChangeListeners() {
+    return this.propertyChangeSupport.getPropertyChangeListeners();
+  }
+
+  /**
+   * Fires a {@link PropertyChangeEvent} to {@linkplain
+   * #addPropertyChangeListener(String, PropertyChangeListener)
+   * registered <tt>PropertyChangeListener</tt>s} if the supplied
+   * {@code old} and {@code newValue} objects are non-{@code null} and
+   * not equal to each other.
+   *
+   * @param propertyName the name of the bound property that might
+   * have changed; may be {@code null} (indicating that some unknown
+   * set of bound properties has changed)
+   *
+   * @param old the old value of the bound property in question; may
+   * be {@code null}
+   *
+   * @param newValue the new value of the bound property; may be
+   * {@code null}
+   */
+  protected final void firePropertyChange(final String propertyName, final Object old, final Object newValue) {
+    final String cn = this.getClass().getName();
+    final String mn = "firePropertyChange";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, new Object[] { propertyName, old, newValue });
+    }
+    this.propertyChangeSupport.firePropertyChange(propertyName, old, newValue);
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
+  }
+
+  /**
+   * Fires a {@link PropertyChangeEvent} to {@linkplain
+   * #addPropertyChangeListener(String, PropertyChangeListener)
+   * registered <tt>PropertyChangeListener</tt>s} if the supplied
+   * {@code old} and {@code newValue} objects are non-{@code null} and
+   * not equal to each other.
+   *
+   * @param propertyName the name of the bound property that might
+   * have changed; may be {@code null} (indicating that some unknown
+   * set of bound properties has changed)
+   *
+   * @param old the old value of the bound property in question
+   *
+   * @param newValue the new value of the bound property
+   */
+  protected final void firePropertyChange(final String propertyName, final int old, final int newValue) {
+    final String cn = this.getClass().getName();
+    final String mn = "firePropertyChange";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, new Object[] { propertyName, Integer.valueOf(old), Integer.valueOf(newValue) });
+    }
+    this.propertyChangeSupport.firePropertyChange(propertyName, old, newValue);
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
+  }
+
+  /**
+   * Fires a {@link PropertyChangeEvent} to {@linkplain
+   * #addPropertyChangeListener(String, PropertyChangeListener)
+   * registered <tt>PropertyChangeListener</tt>s} if the supplied
+   * {@code old} and {@code newValue} objects are non-{@code null} and
+   * not equal to each other.
+   *
+   * @param name the name of the bound property that might
+   * have changed; may be {@code null} (indicating that some unknown
+   * set of bound properties has changed)
+   *
+   * @param old the old value of the bound property in question
+   *
+   * @param newValue the new value of the bound property
+   */
+  protected final void firePropertyChange(final String name, final boolean old, final boolean newValue) {
+    final String cn = this.getClass().getName();
+    final String mn = "firePropertyChange";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, new Object[] { name, Boolean.valueOf(old), Boolean.valueOf(newValue) });
+    }
+    this.propertyChangeSupport.firePropertyChange(name, old, newValue);
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
+  }
+  
 
   /*
    * Inner and nested classes.
