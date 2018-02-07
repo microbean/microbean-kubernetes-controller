@@ -16,15 +16,10 @@
  */
 package org.microbean.kubernetes.controller;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
-import java.util.function.Consumer;
-
 import io.fabric8.kubernetes.api.model.HasMetadata;
-
-import net.jcip.annotations.GuardedBy;
 
 /**
  * An abstract {@link ResourceTrackingEventQueueConsumer} whose

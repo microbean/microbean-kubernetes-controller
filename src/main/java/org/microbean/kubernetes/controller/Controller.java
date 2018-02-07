@@ -399,7 +399,13 @@ public class Controller<T extends HasMetadata> implements Closeable {
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
+    if (this.logger.isLoggable(Level.FINE)) {
+      this.logger.logp(Level.FINE, cn, mn, "Waiting for synchronized property of {0} to become true", this.eventCache);
+    }
     this.eventCache.addPropertyChangeListener("synchronized", this.synchronizedListener);
+    if (this.logger.isLoggable(Level.INFO)) {
+      this.logger.logp(Level.INFO, cn, mn, "Starting {0}", this.reflector);
+    }
     this.reflector.start();
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
@@ -429,12 +435,18 @@ public class Controller<T extends HasMetadata> implements Closeable {
     }
     Exception throwMe = null;    
     try {
+      if (this.logger.isLoggable(Level.INFO)) {
+        this.logger.logp(Level.INFO, cn, mn, "Closing {0}", this.reflector);
+      }
       this.reflector.close();
     } catch (final Exception everything) {
       throwMe = everything;
     }
 
     try {
+      if (this.logger.isLoggable(Level.FINE)) {
+        this.logger.logp(Level.FINE, cn, mn, "Removing PropertyChangeListener {0}", this.synchronizedListener);
+      }
       this.eventCache.removePropertyChangeListener("synchronized", this.synchronizedListener);
     } catch (final RuntimeException runtimeException) {
       if (throwMe == null) {
@@ -445,14 +457,22 @@ public class Controller<T extends HasMetadata> implements Closeable {
     }
     
     try {
+      if (this.logger.isLoggable(Level.INFO)) {
+        this.logger.logp(Level.INFO, cn, mn, "Closing {0}", this.eventCache);
+      }
       this.eventCache.close();
     } catch (final RuntimeException runtimeException) {
       if (throwMe == null) {
         throw runtimeException;
       }
-      assert throwMe instanceof IOException;
       throwMe.addSuppressed(runtimeException);
-      throw (IOException)throwMe;
+      if (throwMe instanceof IOException) {
+        throw (IOException)throwMe;
+      } else if (throwMe instanceof RuntimeException) {
+        throw (RuntimeException)throwMe;
+      } else {
+        throw new IllegalStateException(throwMe.getMessage(), throwMe);
+      }
     }
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
@@ -470,7 +490,16 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * false} otherwise
    */
   protected boolean shouldSynchronize() {
-    return true;
+    final String cn = this.getClass().getName();
+    final String mn = "shouldSynchronize";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
+    final boolean returnValue = true;
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, Boolean.valueOf(returnValue));
+    }
+    return returnValue;
   }
 
   /**
@@ -509,7 +538,16 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * null}
    */
   protected Object getKey(final T resource) {
-    return HasMetadatas.getKey(Objects.requireNonNull(resource));
+    final String cn = this.getClass().getName();
+    final String mn = "getKey";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, resource);
+    }
+    final Object returnValue = HasMetadatas.getKey(Objects.requireNonNull(resource));
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, returnValue);
+    }
+    return returnValue;
   }
 
   /**
@@ -537,7 +575,16 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * {@code null}
    */
   protected Event<T> createEvent(final Object source, final Event.Type eventType, final T resource) {
-    return new Event<T>(Objects.requireNonNull(source), Objects.requireNonNull(eventType), null, Objects.requireNonNull(resource));
+    final String cn = this.getClass().getName();
+    final String mn = "createEvent";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, new Object[] { source, eventType, resource });
+    }
+    final Event<T> returnValue = new Event<>(Objects.requireNonNull(source), Objects.requireNonNull(eventType), null, Objects.requireNonNull(resource));
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, returnValue);
+    }
+    return returnValue;
   }
 
   /**
@@ -558,7 +605,16 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * @exception NullPointerException if {@code key} is {@code null}
    */
   protected EventQueue<T> createEventQueue(final Object key) {
-    return new EventQueue<T>(key);
+    final String cn = this.getClass().getName();
+    final String mn = "createEventQueue";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, key);
+    }
+    final EventQueue<T> returnValue = new EventQueue<>(key);
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, returnValue);
+    }
+    return returnValue;
   }
 
 
@@ -709,6 +765,9 @@ public class Controller<T extends HasMetadata> implements Closeable {
       }
       if (event != null && "synchronized".equals(event.getPropertyName())) {
         if (Boolean.TRUE.equals(event.getNewValue()) && !Boolean.TRUE.equals(event.getOldValue())) {
+          if (logger.isLoggable(Level.INFO)) {
+            logger.logp(Level.INFO, cn, mn, "Starting {0}", siphon);
+          }
           eventCache.start(siphon);
         }
       }

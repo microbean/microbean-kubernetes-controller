@@ -27,6 +27,9 @@ import java.util.Queue;
 
 import java.util.function.Consumer;
 
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 import io.fabric8.kubernetes.api.model.HasMetadata;
 
 import net.jcip.annotations.GuardedBy;
@@ -67,6 +70,15 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
 
 
   /**
+   * A {@link Logger} for use by this {@link EventQueue}.
+   *
+   * <p>This field is never {@code null}.</p>
+   *
+   * @see #createLogger()
+   */
+  protected final Logger logger;
+
+  /**
    * The key identifying the Kubernetes resource to which all of the
    * {@link Event}s managed by this {@link EventQueue} apply.
    *
@@ -99,8 +111,20 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    */
   protected EventQueue(final Object key) {
     super();
+    this.logger = this.createLogger();
+    if (this.logger == null) {
+      throw new IllegalStateException("createLogger() == null");
+    }
+    final String cn = this.getClass().getName();
+    final String mn = "<init>";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, key);
+    }
     this.key = Objects.requireNonNull(key);
     this.events = new LinkedList<>();
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
   }
 
 
@@ -108,6 +132,17 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * Instance methods.
    */
 
+
+  /**
+   * Returns a {@link Logger} for use by this {@link EventQueue}.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>Overrides of this method must not return {@code null}.</p>
+   */
+  protected Logger createLogger() {
+    return Logger.getLogger(this.getClass().getName());
+  }
 
   /**
    * Returns the key identifying the Kubernetes resource to which all
@@ -120,7 +155,16 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * @see #EventQueue(Object)
    */
   public final Object getKey() {
-    return this.key;
+    final String cn = this.getClass().getName();
+    final String mn = "getKey";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
+    final Object returnValue = this.key;
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, returnValue);
+    }
+    return returnValue;
   }
 
   /**
@@ -132,7 +176,16 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * @see #size()
    */
   public synchronized final boolean isEmpty() {
-    return this.events.isEmpty();
+    final String cn = this.getClass().getName();
+    final String mn = "isEmpty";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
+    final boolean returnValue = this.events.isEmpty();
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, Boolean.valueOf(returnValue));
+    }
+    return returnValue;
   }
 
   /**
@@ -147,7 +200,16 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    */
   @Override
   public synchronized final int size() {
-    return this.events.size();
+    final String cn = this.getClass().getName();
+    final String mn = "size";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
+    final int returnValue = this.events.size();
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, Integer.valueOf(returnValue));
+    }
+    return returnValue;
   }
 
   /**
@@ -193,6 +255,11 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * @see #resultsInDeletion()
    */
   final boolean addEvent(final Event<T> event) {
+    final String cn = this.getClass().getName();
+    final String mn = "addEvent";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, event);
+    }
     Objects.requireNonNull(event);
     final Object key = this.getKey();
     if (!key.equals(event.getKey())) {
@@ -218,6 +285,9 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
         }
       }
     }
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, Boolean.valueOf(returnValue));
+    }
     return returnValue;
   }
 
@@ -234,7 +304,16 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * {@linkplain #isEmpty() empty}
    */
   synchronized final Event<T> getLast() {
-    return this.events.getLast();
+    final String cn = this.getClass().getName();
+    final String mn = "getLast";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
+    final Event<T> returnValue = this.events.getLast();
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, returnValue);
+    }
+    return returnValue;
   }
 
   /**
@@ -282,6 +361,11 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * @see #addEvent(Event)
    */
   private synchronized final void deduplicate() {
+    final String cn = this.getClass().getName();
+    final String mn = "deduplicate";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
     final int size = this.size();
     if (size > 2) {
       final Event<T> lastEvent = this.events.get(size - 1);
@@ -297,6 +381,9 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
         this.events.remove(size - 1);
       }
     }
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
   }
 
   /**
@@ -310,7 +397,16 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * otherwise
    */
   synchronized final boolean resultsInDeletion() {
-    return !this.isEmpty() && this.getLast().getType().equals(Event.Type.DELETION);
+    final String cn = this.getClass().getName();
+    final String mn = "resultsInDeletion";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
+    final boolean returnValue = !this.isEmpty() && this.getLast().getType().equals(Event.Type.DELETION);
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, Boolean.valueOf(returnValue));
+    }
+    return returnValue;
   }
 
   /**
