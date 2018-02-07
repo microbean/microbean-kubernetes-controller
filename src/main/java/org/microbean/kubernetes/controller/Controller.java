@@ -466,14 +466,16 @@ public class Controller<T extends HasMetadata> implements Closeable {
         throw runtimeException;
       }
       throwMe.addSuppressed(runtimeException);
-      if (throwMe instanceof IOException) {
-        throw (IOException)throwMe;
-      } else if (throwMe instanceof RuntimeException) {
-        throw (RuntimeException)throwMe;
-      } else {
-        throw new IllegalStateException(throwMe.getMessage(), throwMe);
-      }
     }
+
+    if (throwMe instanceof IOException) {
+      throw (IOException)throwMe;
+    } else if (throwMe instanceof RuntimeException) {
+      throw (RuntimeException)throwMe;
+    } else if (throwMe != null) {
+      throw new IllegalStateException(throwMe.getMessage(), throwMe);
+    }
+
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
     }
