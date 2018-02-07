@@ -108,6 +108,9 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * apply; must not be {@code null}
    *
    * @exception NullPointerException if {@code key} is {@code null}
+   *
+   * @exception IllegalStateException if the {@link #createLogger()}
+   * method returns {@code null}
    */
   protected EventQueue(final Object key) {
     super();
@@ -139,6 +142,8 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * <p>This method never returns {@code null}.</p>
    *
    * <p>Overrides of this method must not return {@code null}.</p>
+   *
+   * @return a non-{@code null} {@link Logger}
    */
   protected Logger createLogger() {
     return Logger.getLogger(this.getClass().getName());

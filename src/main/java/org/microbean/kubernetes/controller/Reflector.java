@@ -149,6 +149,15 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * synchronized on</strong> and into which {@link Event}s will be
    * logically "reflected"; must not be {@code null}
    *
+   * @exception NullPointerException if {@code operation} or {@code
+   * eventCache} is {@code null}
+   *
+   * @exception IllegalStateException if the {@link #createLogger()}
+   * method returns {@code null}
+   *
+   * @see #Reflector(Listable, EventCache, ScheduledExecutorService,
+   * Duration)
+   *
    * @see #start()
    */
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
@@ -177,6 +186,15 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * the time in between one {@linkplain EventCache#synchronize()
    * synchronization operation} and another; may be {@code null} in
    * which case no synchronization will occur
+   *
+   * @exception NullPointerException if {@code operation} or {@code
+   * eventCache} is {@code null}
+   *
+   * @exception IllegalStateException if the {@link #createLogger()}
+   * method returns {@code null}
+   *
+   * @see #Reflector(Listable, EventCache, ScheduledExecutorService,
+   * Duration)
    *
    * @see #start()
    */
@@ -213,6 +231,12 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * the time in between one {@linkplain EventCache#synchronize()
    * synchronization operation} and another; may be {@code null} in
    * which case no synchronization will occur
+   *
+   * @exception NullPointerException if {@code operation} or {@code
+   * eventCache} is {@code null}
+   *
+   * @exception IllegalStateException if the {@link #createLogger()}
+   * method returns {@code null}
    *
    * @see #start()
    */
@@ -349,8 +373,14 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       }
         
       if (seconds > 0L) {
+        if (this.logger.isLoggable(Level.INFO)) {
+          this.logger.logp(Level.INFO, cn, mn, "Scheduling downstream synchronization every {0} seconds", Long.valueOf(seconds));
+        }
         final ScheduledFuture<?> job = this.synchronizationExecutorService.scheduleWithFixedDelay(() -> {
             if (shouldSynchronize()) {
+              if (logger.isLoggable(Level.FINE)) {
+                logger.logp(Level.FINE, cn, mn, "Synchronizing event cache with its downstream consumers");
+              }
               synchronized (eventCache) {
                 eventCache.synchronize();
               }
