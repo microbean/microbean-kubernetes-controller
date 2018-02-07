@@ -271,14 +271,31 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * Instance methods.
    */
 
+  /**
+   * Returns a {@link Logger} for use by this {@link
+   * EventQueueCollection}.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>Overrides of this method must not return {@code null}.</p>
+   *
+   * @return a non-{@code null} {@link Logger} for use by this {@link
+   * EventQueueCollection}
+   */
   protected Logger createLogger() {
     return Logger.getLogger(this.getClass().getName());
   }
-  
+
   private final Map<?, ? extends T> getKnownObjects() {
     return this.knownObjects;
   }
 
+  /**
+   * Returns {@code true} if this {@link EventQueueCollection} is empty.
+   *
+   * @return {@code true} if this {@link EventQueueCollection} is
+   * empty; {@code false} otherwise
+   */
   private synchronized final boolean isEmpty() {
     return this.map.isEmpty();
   }
@@ -350,6 +367,10 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * HasMetadata)} at some point, and if there are no {@link
    * EventQueue}s remaining to be {@linkplain #start(Consumer)
    * removed}.
+   *
+   * <p>This is a <a
+   * href="https://docs.oracle.com/javase/tutorial/javabeans/writing/properties.html#bound">bound
+   * property</a>.</p>
    *
    * @return {@code true} if this {@link EventQueueCollection} has
    * been populated via a call to {@link #add(Object, Event.Type,
