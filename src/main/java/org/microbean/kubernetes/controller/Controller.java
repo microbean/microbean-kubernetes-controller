@@ -31,6 +31,9 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import java.util.function.Consumer;
 
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
 
@@ -92,6 +95,15 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * Instance fields.
    */
 
+
+  /**
+   * A {@link Logger} used by this {@link Controller}.
+   *
+   * <p>This field is never {@code null}.</p>
+   *
+   * @see #createLogger()
+   */
+  protected final Logger logger;
 
   /**
    * The {@link Reflector} used by this {@link Controller} to mirror
@@ -333,17 +345,42 @@ public class Controller<T extends HasMetadata> implements Closeable {
                                                                                                                                final Map<Object, T> knownObjects,
                                                                                                                                final Consumer<? super EventQueue<? extends T>> siphon) {
     super();
+    this.logger = this.createLogger();
+    if (this.logger == null) {
+      throw new IllegalStateException("createLogger() == null");
+    }
+    final String cn = this.getClass().getName();
+    final String mn = "<init>";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, new Object[] { operation, synchronizationExecutorService, synchronizationInterval, knownObjects, siphon });
+    }
     this.siphon = Objects.requireNonNull(siphon);
     this.eventCache = new ControllerEventQueueCollection(knownObjects);    
     this.synchronizedListener = new SynchronizedListener();
     this.reflector = new ControllerReflector(operation, synchronizationExecutorService, synchronizationInterval);
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
   }
 
 
   /*
    * Instance methods.
    */
-  
+
+
+  /**
+   * Returns a {@link Logger} for use by this {@link Controller}.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>Overrides of this method must not return {@code null}.</p>
+   *
+   * @return a non-{@code null} {@link Logger}
+   */
+  protected Logger createLogger() {
+    return Logger.getLogger(this.getClass().getName());
+  }
 
   /**
    * {@linkplain EventQueueCollection#start(Consumer) Starts the
@@ -357,8 +394,16 @@ public class Controller<T extends HasMetadata> implements Closeable {
    */
   @NonBlocking
   public final void start() {
+    final String cn = this.getClass().getName();
+    final String mn = "start";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
     this.eventCache.addPropertyChangeListener("synchronized", this.synchronizedListener);
     this.reflector.start();
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
   }
 
   /**
@@ -377,6 +422,11 @@ public class Controller<T extends HasMetadata> implements Closeable {
    */
   @Override
   public final void close() throws IOException {
+    final String cn = this.getClass().getName();
+    final String mn = "close";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
     Exception throwMe = null;    
     try {
       this.reflector.close();
@@ -403,6 +453,9 @@ public class Controller<T extends HasMetadata> implements Closeable {
       assert throwMe instanceof IOException;
       throwMe.addSuppressed(runtimeException);
       throw (IOException)throwMe;
+    }
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
     }
   }
 
@@ -649,10 +702,18 @@ public class Controller<T extends HasMetadata> implements Closeable {
      */
     @Override
     public final void propertyChange(final PropertyChangeEvent event) {
+      final String cn = this.getClass().getName();
+      final String mn = "propertyChange";
+      if (logger.isLoggable(Level.FINER)) {
+        logger.entering(cn, mn, event);
+      }
       if (event != null && "synchronized".equals(event.getPropertyName())) {
         if (Boolean.TRUE.equals(event.getNewValue()) && !Boolean.TRUE.equals(event.getOldValue())) {
           eventCache.start(siphon);
         }
+      }
+      if (logger.isLoggable(Level.FINER)) {
+        logger.exiting(cn, mn);
       }
     }
     
