@@ -59,9 +59,9 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
    * tracking will take place.</p>
    *
    * <p>The value of this field is {@linkplain
-   * #AbstractEventDistributor(Map) supplied at construction time} and
-   * is <strong>synchronized on</strong> and written to, if non-{@code
-   * null}, by the {@link #accept(EventQueue)} method.</p>
+   * #ResourceTrackingEventQueueConsumer(Map) supplied at construction
+   * time} and is <strong>synchronized on</strong> and written to, if
+   * non-{@code null}, by the {@link #accept(EventQueue)} method.</p>
    *
    * <p>This class <strong>synchronizes on this field's
    * value</strong>, if it is non-{@code null}, when mutating its

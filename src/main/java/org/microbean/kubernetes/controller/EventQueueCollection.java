@@ -20,6 +20,8 @@ import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
 
+import java.io.Serializable;
+
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -154,7 +156,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * <p>Mutations of the contents of this {@link LinkedHashMap} must
    * be synchronized on {@code this}.</p>
    *
-   * @see #add(Object, Event.Type, Resource)
+   * @see #add(Object, Event.Type, HasMetadata)
    */
   @GuardedBy("this")
   private final LinkedHashMap<Object, EventQueue<T>> map;
@@ -976,7 +978,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * the {@link Event} that will be created and added; must not be
    * {@code null}
    *
-   * @param populate if {@link true} then this {@link
+   * @param populate if {@code true} then this {@link
    * EventQueueCollection} will be internally marked as <em>initially
    * populated</em>
    *
@@ -1022,7 +1024,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    *
    * @param event the {@link Event} to add; must not be {@code null}
    *
-   * @param populate if {@link true} then this {@link
+   * @param populate if {@code true} then this {@link
    * EventQueueCollection} will be internally marked as <em>initially
    * populated</em>
    *

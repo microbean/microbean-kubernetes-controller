@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.NoSuchElementException; // for javadoc only
 import java.util.Objects;
 import java.util.Queue;
 
@@ -355,7 +356,7 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
   /**
    * If this {@link EventQueue}'s {@linkplain #size() size} is greater
    * than {@code 2}, and if its last two {@link Event}s are
-   * {@linkplain Event.Type.DELETION deletions}, and if the
+   * {@linkplain Event.Type#DELETION deletions}, and if the
    * next-to-last deletion {@link Event}'s {@linkplain
    * Event#isFinalStateKnown() state is known}, then this method
    * causes that {@link Event} to replace the two under consideration.
@@ -395,7 +396,7 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * Returns {@code true} if this {@link EventQueue} is {@linkplain
    * #isEmpty() not empty} and the {@linkplain #getLast() last
    * <code>Event</code> in this <code>EventQueue</code>} is a
-   * {@linkplain Event.Type.DELETION deletion event}.
+   * {@linkplain Event.Type#DELETION deletion event}.
    *
    * @return {@code true} if this {@link EventQueue} currently
    * logically represents the deletion of a resource, {@code false}

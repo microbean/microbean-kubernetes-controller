@@ -22,6 +22,8 @@
  * @author <a href="https://about.me/lairdnelson"
  * target="_parent">Laird Nelson</a>
  *
+ * @see org.microbean.kubernetes.controller.Controller
+ *
  * @see org.microbean.kubernetes.controller.EventCache
  *
  * @see org.microbean.kubernetes.controller.EventQueueCollection
