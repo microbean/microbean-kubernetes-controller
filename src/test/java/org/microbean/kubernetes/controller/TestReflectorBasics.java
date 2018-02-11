@@ -81,7 +81,7 @@ public class TestReflectorBasics {
     final Consumer<? super EventQueue<? extends ConfigMap>> siphon = (q) -> {
       assertNotNull(q);
       assertFalse(q.isEmpty());
-      for (final Event<? extends ConfigMap> event : q) {
+      for (final AbstractEvent<? extends ConfigMap> event : q) {
         assertNotNull(event);
         System.out.println("*** received event: " + event);
         final Event.Type type = event.getType();

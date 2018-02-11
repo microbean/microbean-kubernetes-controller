@@ -38,10 +38,11 @@ import net.jcip.annotations.ThreadSafe;
 
 /**
  * A publicly-unmodifiable {@link AbstractCollection} of {@link
- * Event}s produced by an {@link EventQueueCollection}.
+ * AbstractEvent}s produced by an {@link EventQueueCollection}.
  *
- * <p>All {@link Event}s in an {@link EventQueue} describe the life of
- * a single {@linkplain HasMetadata resource} in Kubernetes.</p>
+ * <p>All {@link AbstractEvent}s in an {@link EventQueue} describe the
+ * life of a single {@linkplain HasMetadata resource} in
+ * Kubernetes.</p>
  *
  * <h2>Thread Safety</h2>
  *
@@ -62,7 +63,7 @@ import net.jcip.annotations.ThreadSafe;
  * @see EventQueueCollection
  */
 @ThreadSafe
-public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<T>> {
+public class EventQueue<T extends HasMetadata> extends AbstractCollection<AbstractEvent<T>> {
 
   
   /*
@@ -81,19 +82,19 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
 
   /**
    * The key identifying the Kubernetes resource to which all of the
-   * {@link Event}s managed by this {@link EventQueue} apply.
+   * {@link AbstractEvent}s managed by this {@link EventQueue} apply.
    *
    * <p>This field is never {@code null}.</p>
    */
   private final Object key;
 
   /**
-   * The actual underlying queue of {@link Event}s.
+   * The actual underlying queue of {@link AbstractEvent}s.
    *
    * <p>This field is never {@code null}.</p>
    */
   @GuardedBy("this")
-  private final LinkedList<Event<T>> events;
+  private final LinkedList<AbstractEvent<T>> events;
 
 
   /*
@@ -105,8 +106,8 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * Creates a new {@link EventQueue}.
    *
    * @param key the key identifying the Kubernetes resource to which
-   * all of the {@link Event}s managed by this {@link EventQueue}
-   * apply; must not be {@code null}
+   * all of the {@link AbstractEvent}s managed by this {@link
+   * EventQueue} apply; must not be {@code null}
    *
    * @exception NullPointerException if {@code key} is {@code null}
    *
@@ -152,7 +153,8 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
 
   /**
    * Returns the key identifying the Kubernetes resource to which all
-   * of the {@link Event}s managed by this {@link EventQueue} apply.
+   * of the {@link AbstractEvent}s managed by this {@link EventQueue}
+   * apply.
    *
    * <p>This method never returns {@code null}.</p>
    *
@@ -219,20 +221,20 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
   }
 
   /**
-   * Adds the supplied {@link Event} to this {@link EventQueue} under
-   * certain conditions.
+   * Adds the supplied {@link AbstractEvent} to this {@link
+   * EventQueue} under certain conditions.
    *
-   * <p>The supplied {@link Event} is added to this {@link EventQueue}
-   * if:</p>
+   * <p>The supplied {@link AbstractEvent} is added to this {@link
+   * EventQueue} if:</p>
    *
    * <ul>
    *
-   * <li>its {@linkplain Event#getKey() key} is equal to this {@link
-   * EventQueue}'s {@linkplain #getKey() key}</li>
+   * <li>its {@linkplain AbstractEvent#getKey() key} is equal to this
+   * {@link EventQueue}'s {@linkplain #getKey() key}</li>
    *
-   * <li>it is either not a {@linkplain Event.Type#SYNCHRONIZATION
+   * <li>it is either not a {@linkplain SynchronizationEvent}
    * synchronization event}, or it <em>is</em> a {@linkplain
-   * Event.Type#SYNCHRONIZATION synchronization event} and this {@link
+   * SynchronizationEvent synchronization event} and this {@link
    * EventQueue} does not represent a sequence of events that
    * {@linkplain #resultsInDeletion() describes a deletion}, and</li>
    *
@@ -241,7 +243,8 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    *
    * </ul>
    *
-   * @param event the {@link Event} to add; must not be {@code null}
+   * @param event the {@link AbstractEvent} to add; must not be {@code
+   * null}
    *
    * @return {@code true} if an addition took place and {@linkplain
    * #compress(Collection) optional compression} did not result in
@@ -251,36 +254,45 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * @exception NullPointerException if {@code event} is {@code null}
    *
    * @exception IllegalArgumentException if {@code event}'s
-   * {@linkplain Event#getKey() key} is not equal to this {@link
-   * EventQueue}'s {@linkplain #getKey() key}
+   * {@linkplain AbstractEvent#getKey() key} is not equal to this
+   * {@link EventQueue}'s {@linkplain #getKey() key}
    *
    * @see #compress(Collection)
    *
-   * @see Event.Type#SYNCHRONIZATION
+   * @see SynchronizationEvent
    *
    * @see #resultsInDeletion()
    */
-  final boolean addEvent(final Event<T> event) {
+  final boolean addEvent(final AbstractEvent<T> event) {
     final String cn = this.getClass().getName();
     final String mn = "addEvent";
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn, event);
     }
+    
     Objects.requireNonNull(event);
+
     final Object key = this.getKey();
     if (!key.equals(event.getKey())) {
       throw new IllegalArgumentException("!this.getKey().equals(event.getKey()): " + key + ", " + event.getKey());
     }
+
     boolean returnValue = false;
-    final Event.Type eventType = event.getType();
+
+    final AbstractEvent.Type eventType = event.getType();
     assert eventType != null;
+
     synchronized (this) {
-      if (!eventType.equals(Event.Type.SYNCHRONIZATION) || !this.resultsInDeletion()) {
+      if (!(event instanceof SynchronizationEvent) || !this.resultsInDeletion()) {
+        // If the event is NOT a synchronization event (so it's an
+        // addition, modification, or deletion)...
+        // ...OR if it IS a synchronization event AND we are NOT
+        // already going to delete this queue...
         returnValue = this.events.add(event);
         if (returnValue) {
           this.deduplicate();
-          final Collection<Event<T>> readOnlyEvents = Collections.unmodifiableCollection(this.events);
-          final Collection<Event<T>> newEvents = this.compress(readOnlyEvents);
+          final Collection<AbstractEvent<T>> readOnlyEvents = Collections.unmodifiableCollection(this.events);
+          final Collection<AbstractEvent<T>> newEvents = this.compress(readOnlyEvents);
           if (newEvents != readOnlyEvents) {
             this.events.clear();
             if (newEvents != null && !newEvents.isEmpty()) {
@@ -291,6 +303,7 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
         }
       }
     }
+    
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn, Boolean.valueOf(returnValue));
     }
@@ -298,24 +311,24 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
   }
 
   /**
-   * Returns the last (and definitionally newest) {@link Event} in
-   * this {@link EventQueue}.
+   * Returns the last (and definitionally newest) {@link
+   * AbstractEvent} in this {@link EventQueue}.
    *
    * <p>This method never returns {@code null}.</p>
    *
-   * @return the last {@link Event} in this {@link EventQueue}; never
-   * {@code null}
+   * @return the last {@link AbstractEvent} in this {@link
+   * EventQueue}; never {@code null}
    *
    * @exception NoSuchElementException if this {@link EventQueue} is
    * {@linkplain #isEmpty() empty}
    */
-  synchronized final Event<T> getLast() {
+  synchronized final AbstractEvent<T> getLast() {
     final String cn = this.getClass().getName();
     final String mn = "getLast";
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
-    final Event<T> returnValue = this.events.getLast();
+    final AbstractEvent<T> returnValue = this.events.getLast();
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn, returnValue);
     }
@@ -325,8 +338,8 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
   /**
    * Synchronizes on this {@link EventQueue} and, while holding its
    * monitor, invokes the {@link Consumer#accept(Object)} method on
-   * the supplied {@link Consumer} for every {@link Event} in this
-   * {@link EventQueue}.
+   * the supplied {@link Consumer} for every {@link AbstractEvent} in
+   * this {@link EventQueue}.
    *
    * @param action the {@link Consumer} in question; must not be
    * {@code null}
@@ -334,7 +347,7 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * @exception NullPointerException if {@code action} is {@code null}
    */
   @Override
-  public synchronized final void forEach(final Consumer<? super Event<T>> action) {
+  public synchronized final void forEach(final Consumer<? super AbstractEvent<T>> action) {
     super.forEach(action);
   }
   
@@ -346,25 +359,25 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * <p>This method never returns {@code null}.</p>
    *
    * @return a non-{@code null} unmodifiable {@link Iterator} of
-   * {@link Event}s
+   * {@link AbstractEvent}s
    */
   @Override
-  public synchronized final Iterator<Event<T>> iterator() {
+  public synchronized final Iterator<AbstractEvent<T>> iterator() {
     return Collections.unmodifiableCollection(this.events).iterator();
   }
 
   /**
    * If this {@link EventQueue}'s {@linkplain #size() size} is greater
-   * than {@code 2}, and if its last two {@link Event}s are
-   * {@linkplain Event.Type#DELETION deletions}, and if the
-   * next-to-last deletion {@link Event}'s {@linkplain
-   * Event#isFinalStateKnown() state is known}, then this method
-   * causes that {@link Event} to replace the two under consideration.
+   * than {@code 2}, and if its last two {@link AbstractEvent}s are
+   * {@linkplain AbstractEvent.Type#DELETION deletions}, and if the
+   * next-to-last deletion {@link AbstractEvent}'s {@linkplain
+   * AbstractEvent#isFinalStateKnown() state is known}, then this method
+   * causes that {@link AbstractEvent} to replace the two under consideration.
    *
-   * <p>This method is called only by the {@link #addEvent(Event)}
+   * <p>This method is called only by the {@link #addEvent(AbstractEvent)}
    * method.</p>
    *
-   * @see #addEvent(Event)
+   * @see #addEvent(AbstractEvent)
    */
   private synchronized final void deduplicate() {
     final String cn = this.getClass().getName();
@@ -374,10 +387,10 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
     }
     final int size = this.size();
     if (size > 2) {
-      final Event<T> lastEvent = this.events.get(size - 1);
-      final Event<T> nextToLastEvent = this.events.get(size - 2);
-      final Event<T> event;
-      if (lastEvent != null && nextToLastEvent != null && Event.Type.DELETION.equals(lastEvent.getType()) && Event.Type.DELETION.equals(nextToLastEvent.getType())) {
+      final AbstractEvent<T> lastEvent = this.events.get(size - 1);
+      final AbstractEvent<T> nextToLastEvent = this.events.get(size - 2);
+      final AbstractEvent<T> event;
+      if (lastEvent != null && nextToLastEvent != null && AbstractEvent.Type.DELETION.equals(lastEvent.getType()) && AbstractEvent.Type.DELETION.equals(nextToLastEvent.getType())) {
         event = nextToLastEvent.isFinalStateKnown() ? nextToLastEvent : lastEvent;
       } else {
         event = null;
@@ -395,8 +408,8 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
   /**
    * Returns {@code true} if this {@link EventQueue} is {@linkplain
    * #isEmpty() not empty} and the {@linkplain #getLast() last
-   * <code>Event</code> in this <code>EventQueue</code>} is a
-   * {@linkplain Event.Type#DELETION deletion event}.
+   * <code>AbstractEvent</code> in this <code>EventQueue</code>} is a
+   * {@linkplain AbstractEvent.Type#DELETION deletion event}.
    *
    * @return {@code true} if this {@link EventQueue} currently
    * logically represents the deletion of a resource, {@code false}
@@ -408,7 +421,7 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
-    final boolean returnValue = !this.isEmpty() && this.getLast().getType().equals(Event.Type.DELETION);
+    final boolean returnValue = !this.isEmpty() && this.getLast().getType().equals(AbstractEvent.Type.DELETION);
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn, Boolean.valueOf(returnValue));
     }
@@ -417,7 +430,7 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
 
   /**
    * Performs a compression operation on the supplied {@link
-   * Collection} of {@link Event}s and returns the result of that
+   * Collection} of {@link AbstractEvent}s and returns the result of that
    * operation.
    *
    * <p>This method may return {@code null}, which will result in the
@@ -427,8 +440,8 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * monitor.</p>
    *
    * <p>This method is called when an {@link EventQueueCollection} (or
-   * some other {@link Event} producer with access to
-   * package-protected methods of this class) adds an {@link Event} to
+   * some other {@link AbstractEvent} producer with access to
+   * package-protected methods of this class) adds an {@link AbstractEvent} to
    * this {@link EventQueue} and provides the {@link EventQueue}
    * implementation with the ability to eliminate duplicates or
    * otherwise compress the event stream it represents.</p>
@@ -438,7 +451,7 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    *
    * @param events an {@link
    * Collections#unmodifiableCollection(Collection) unmodifiable
-   * <tt>Collection</tt>} of {@link Event}s representing the
+   * <tt>Collection</tt>} of {@link AbstractEvent}s representing the
    * current state of this {@link EventQueue}; will never be {@code
    * null}
    *
@@ -446,7 +459,7 @@ public class EventQueue<T extends HasMetadata> extends AbstractCollection<Event<
    * may be {@code null}; may simply be the supplied {@code events}
    * {@link Collection} if compression is not desired or implemented
    */
-  protected Collection<Event<T>> compress(final Collection<Event<T>> events) {
+  protected Collection<AbstractEvent<T>> compress(final Collection<AbstractEvent<T>> events) {
     return events;
   }
 

@@ -39,7 +39,7 @@ import net.jcip.annotations.GuardedBy;
  * @author <a href="https://about.me/lairdnelson"
  * target="_parent">Laird Nelson</a>
  *
- * @see #accept(Event.Type, HasMetadata, HasMetadata)
+ * @see #accept(AbstractEvent)
  *
  * @see Controller
  */
@@ -148,19 +148,27 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
   
   /**
    * {@linkplain EventQueue#iterator() Loops through} all the {@link
-   * Event}s in the supplied {@link EventQueue}, keeping track of the
-   * {@link HasMetadata} it concerns along the way by
+   * AbstractEvent}s in the supplied {@link EventQueue}, keeping track
+   * of the {@link HasMetadata} it concerns along the way by
    * <strong>synchronizing on</strong> and writing to the {@link Map}
    * {@linkplain #ResourceTrackingEventQueueConsumer(Map) supplied at
    * construction time}.
    *
-   * <p>Individual {@link Event}s are forwarded on to the {@link
-   * #accept(Event.Type, HasMetadata, HasMetadata)} method.</p>
+   * <p>Individual {@link AbstractEvent}s are forwarded on to the
+   * {@link #accept(AbstractEvent)} method.</p>
+   *
+   * <h2>Implementation Notes</h2>
+   *
+   * <p>This loosely models the <a
+   * href="https://github.com/kubernetes/client-go/blob/v6.0.0/tools/cache/shared_informer.go#L343">{@code
+   * HandleDeltas} function in {@code
+   * tools/cache/shared_informer.go}</a>.  The final distribution step
+   * is left unimplemented on purpose.</p>
    *
    * @param eventQueue the {@link EventQueue} to process; may be
    * {@code null} in which case no action will be taken
    *
-   * @see #accept(Event.Type, HasMetadata, HasMetadata)
+   * @see #accept(AbstractEvent)
    */
   @Override
   public final void accept(final EventQueue<? extends T> eventQueue) {
@@ -175,11 +183,13 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
         if (this.logger.isLoggable(Level.FINER)) {
           this.logger.entering(cn, mn, eventQueue);
         }
+        
         final Object key = eventQueue.getKey();
         if (key == null) {
           throw new IllegalStateException("eventQueue.getKey() == null; eventQueue: " + eventQueue);
         }        
-        for (final Event<? extends T> event : eventQueue) {
+
+        for (final AbstractEvent<? extends T> event : eventQueue) {
           if (event != null) {
             assert key.equals(event.getKey());            
             final Event.Type eventType = event.getType();
@@ -190,32 +200,47 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
               // logged
             }
             final T priorResource;
-            final Event.Type newEventType;
+            final AbstractEvent<? extends T> newEvent;
             if (this.knownObjects == null) {
               priorResource = null;
-              newEventType = eventType;
+              newEvent = event;
             } else {
               synchronized (this.knownObjects) {
-                priorResource = this.knownObjects.get(key);
-                if (eventType.equals(Event.Type.DELETION)) {
-                  this.knownObjects.remove(key);
-                  newEventType = Event.Type.DELETION;
+                if (Event.Type.DELETION.equals(eventType)) {
+                  priorResource = this.knownObjects.remove(key);
+                  newEvent = event;
                 } else {
-                  assert eventType.equals(Event.Type.ADDITION) || eventType.equals(Event.Type.MODIFICATION) || eventType.equals(Event.Type.SYNCHRONIZATION);
-                  this.knownObjects.put(key, newResource);
-                  if (priorResource == null) {
-                    newEventType = Event.Type.ADDITION;
-                  } else if (eventType.equals(Event.Type.SYNCHRONIZATION)) {
-                    newEventType = Event.Type.SYNCHRONIZATION;
+                  assert eventType.equals(Event.Type.ADDITION) || eventType.equals(Event.Type.MODIFICATION);
+                  priorResource = this.knownObjects.put(key, newResource);
+                  if (event instanceof SynchronizationEvent) {
+                    if (priorResource == null) {
+                      if (Event.Type.ADDITION.equals(eventType)) {
+                        newEvent = event;
+                      } else {
+                        newEvent = null;
+                        assert false;
+                      }
+                    } else {
+                      newEvent = this.createSynchronizationEvent(Event.Type.MODIFICATION, priorResource, newResource);
+                    }
+                  } else if (priorResource == null) {
+                    if (Event.Type.ADDITION.equals(eventType)) {
+                      newEvent = event;
+                    } else {
+                      newEvent = this.createEvent(Event.Type.ADDITION, null, newResource);
+                    }
                   } else {
-                    newEventType = Event.Type.MODIFICATION;
+                    newEvent = this.createEvent(Event.Type.MODIFICATION, priorResource, newResource);
                   }
                 }
               }
             }
-            this.accept(newEventType, priorResource, newResource);
+            assert newEvent != null;
+            assert newEvent instanceof SynchronizationEvent || newEvent instanceof Event;
+            this.accept(newEvent);
           }
         }
+        
       }
     }
     if (this.logger.isLoggable(Level.FINER)) {
@@ -223,32 +248,50 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
     }
   }
 
+  protected Event<T> createEvent(final Event.Type eventType, final T priorResource, final T resource) {
+    final String cn = this.getClass().getName();
+    final String mn = "createEvent";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, new Object[] { eventType, priorResource, resource });
+    }
+    Objects.requireNonNull(eventType);
+    final Event<T> returnValue = new Event<>(this, eventType, priorResource, resource);
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, returnValue);
+    }
+    return returnValue;
+  }
+
+  protected SynchronizationEvent<T> createSynchronizationEvent(final Event.Type eventType, final T priorResource, final T resource) {
+    final String cn = this.getClass().getName();
+    final String mn = "createSynchronizationEvent";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, new Object[] { eventType, priorResource, resource });
+    }
+    Objects.requireNonNull(eventType);
+    final SynchronizationEvent<T> returnValue = new SynchronizationEvent<>(this, eventType, priorResource, resource);
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, returnValue);
+    }
+    return returnValue;
+  }
+
   /**
-   * Called to process the contents of a given {@link Event} from the
-   * {@link EventQueue} supplied to the {@link #accept(EventQueue)}
-   * method, <strong>with that {@link EventQueue}'s monitor
-   * held</strong>.
+   * Called to process a given {@link AbstractEvent} from the {@link
+   * EventQueue} supplied to the {@link #accept(EventQueue)} method,
+   * <strong>with that {@link EventQueue}'s monitor held</strong>.
    *
    * <p>Implementations of this method should be relatively fast as
    * this method dictates the speed of {@link EventQueue}
    * processing.</p>
    *
-   * @param eventType the {@link Event.Type} describing the event
-   * encountered in the {@link EventQueue}; must not be {@code null}
+   * @param event the {@link AbstractEvent} encountered in the {@link
+   * EventQueue}; must not be {@code null}
    *
-   * @param priorResource the <em>prior state</em> of the Kubernetes
-   * resource this logical event concerns; may be {@code null}
-   *
-   * @param resource the Kubernetes resource this logical event
-   * concerns; must not be {@code null}
-   *
-   * @exception NullPointerException if {@code eventType} or {@code
-   * resource} is {@code null}
+   * @exception NullPointerException if {@code event} is {@code null}
    *
    * @see #accept(EventQueue)
-   *
-   * @see Event#Event(Object, Event.Type, HasMetadata, HasMetadata)
    */
-  protected abstract void accept(final Event.Type eventType, final T priorResource, final T resource);
+  protected abstract void accept(final AbstractEvent<? extends T> event);
   
 }

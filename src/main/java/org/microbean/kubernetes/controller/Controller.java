@@ -120,7 +120,8 @@ public class Controller<T extends HasMetadata> implements Closeable {
    *
    * <p>This field is never {@code null}.</p>
    *
-   * @see EventQueueCollection#add(Object, Event.Type, HasMetadata)
+   * @see EventQueueCollection#add(Object, AbstractEvent.Type,
+   * HasMetadata)
    *
    * @see EventQueueCollection#replace(Collection, Object)
    *
@@ -138,18 +139,6 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * <p>This field is never {@code null}.</p>
    */
   private final Consumer<? super EventQueue<? extends T>> siphon;
-
-  /**
-   * A {@link PropertyChangeListener} that listens for changes to the
-   * bound property named {@code synchronized} of this {@link
-   * Controller}'s associated {@link EventQueueCollection}
-   *
-   * <p>This field is never {@code null}.</p>
-   *
-   * @see EventQueueCollection#addPropertyChangeListener(String,
-   * PropertyChangeListener)
-   */
-  private final PropertyChangeListener synchronizedListener;
 
   
   /*
@@ -356,7 +345,6 @@ public class Controller<T extends HasMetadata> implements Closeable {
     }
     this.siphon = Objects.requireNonNull(siphon);
     this.eventCache = new ControllerEventQueueCollection(knownObjects);    
-    this.synchronizedListener = new SynchronizedListener();
     this.reflector = new ControllerReflector(operation, synchronizationExecutorService, synchronizationInterval);
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
@@ -399,10 +387,10 @@ public class Controller<T extends HasMetadata> implements Closeable {
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
-    if (this.logger.isLoggable(Level.FINE)) {
-      this.logger.logp(Level.FINE, cn, mn, "Waiting for synchronized property of {0} to become true", this.eventCache);
+    if (this.logger.isLoggable(Level.INFO)) {
+      this.logger.logp(Level.INFO, cn, mn, "Starting {0}", this.siphon);
     }
-    this.eventCache.addPropertyChangeListener("synchronized", this.synchronizedListener);
+    this.eventCache.start(this.siphon);
     if (this.logger.isLoggable(Level.INFO)) {
       this.logger.logp(Level.INFO, cn, mn, "Starting {0}", this.reflector);
     }
@@ -443,19 +431,6 @@ public class Controller<T extends HasMetadata> implements Closeable {
       throwMe = everything;
     }
 
-    try {
-      if (this.logger.isLoggable(Level.FINE)) {
-        this.logger.logp(Level.FINE, cn, mn, "Removing PropertyChangeListener {0}", this.synchronizedListener);
-      }
-      this.eventCache.removePropertyChangeListener("synchronized", this.synchronizedListener);
-    } catch (final RuntimeException runtimeException) {
-      if (throwMe == null) {
-        throwMe = runtimeException;
-      } else {
-        throwMe.addSuppressed(runtimeException);
-      }
-    }
-    
     try {
       if (this.logger.isLoggable(Level.INFO)) {
         this.logger.logp(Level.INFO, cn, mn, "Closing {0}", this.eventCache);
@@ -711,73 +686,6 @@ public class Controller<T extends HasMetadata> implements Closeable {
     protected final void onClose() {
       Controller.this.onClose();
     }
-  }
-
-  /**
-   * A {@link PropertyChangeListener} that listens for changes to the
-   * bound property named {@code synchronized} belonging to the value
-   * of the {@link Controller#eventCache} field.
-   *
-   * @author <a href="https://about.me/lairdnelson"
-   * target="_parent">Laird Nelson</a>
-   *
-   * @see EventQueueCollection#addPropertyChangeListener(String,
-   * PropertyChangeListener)
-   *
-   * @see EventQueueCollection#isSynchronized()
-   */
-  private final class SynchronizedListener implements PropertyChangeListener {
-
-
-    /*
-     * Constructors.
-     */
-
-
-    /**
-     * Creates a new {@link SynchronizedListener}.
-     */
-    private SynchronizedListener() {
-      super();
-    }
-
-    /**
-     * If the supplied {@code event} is non-{@code null} and describes
-     * a change to the {@code synchronized} bound property of an
-     * {@link EventQueueCollection} that results in its being {@code
-     * true}, calls the {@link EventQueueCollection#start(Consumer)}
-     * method on the {@link Consumer} that was supplied to the
-     * enclosing {@link Controller}'s constructor.
-     *
-     * @param event a {@link PropertyChangeEvent}; may be {@code null}
-     *
-     * @see EventQueueCollection#start(Consumer)
-     *
-     * @see EventQueueCollection#isSynchronized()
-     *
-     * @see EventQueueCollection#addPropertyChangeListener(String,
-     * PropertyChangeListener)
-     */
-    @Override
-    public final void propertyChange(final PropertyChangeEvent event) {
-      final String cn = this.getClass().getName();
-      final String mn = "propertyChange";
-      if (logger.isLoggable(Level.FINER)) {
-        logger.entering(cn, mn, event);
-      }
-      if (event != null && "synchronized".equals(event.getPropertyName())) {
-        if (Boolean.TRUE.equals(event.getNewValue()) && !Boolean.TRUE.equals(event.getOldValue())) {
-          if (logger.isLoggable(Level.INFO)) {
-            logger.logp(Level.INFO, cn, mn, "Starting {0}", siphon);
-          }
-          eventCache.start(siphon);
-        }
-      }
-      if (logger.isLoggable(Level.FINER)) {
-        logger.exiting(cn, mn);
-      }
-    }
-    
   }
   
 }

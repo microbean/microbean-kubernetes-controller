@@ -67,7 +67,7 @@ import org.microbean.development.annotation.NonBlocking;
  * @author <a href="https://about.me/lairdnelson"
  * target="_parent">Laird Nelson</a>
  *
- * @see #add(Object, Event.Type, HasMetadata)
+ * @see #add(Object, AbstractEvent.Type, HasMetadata)
  *
  * @see #replace(Collection, Object)
  *
@@ -156,7 +156,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * <p>Mutations of the contents of this {@link LinkedHashMap} must
    * be synchronized on {@code this}.</p>
    *
-   * @see #add(Object, Event.Type, HasMetadata)
+   * @see #add(Object, AbstractEvent.Type, HasMetadata)
    */
   @GuardedBy("this")
   private final LinkedHashMap<Object, EventQueue<T>> map;
@@ -305,7 +305,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
   /**
    * Returns an {@link Iterator} of {@link EventQueue} instances that
    * are created and managed by this {@link EventQueueCollection} as a
-   * result of the {@link #add(Object, Event.Type, HasMetadata)},
+   * result of the {@link #add(Object, AbstractEvent.Type, HasMetadata)},
    * {@link #replace(Collection, Object)} and {@link #synchronize()}
    * methods.
    *
@@ -328,7 +328,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
   /**
    * Returns a {@link Spliterator} of {@link EventQueue} instances
    * that are created and managed by this {@link EventQueueCollection}
-   * as a result of the {@link #add(Object, Event.Type, HasMetadata)},
+   * as a result of the {@link #add(Object, AbstractEvent.Type, HasMetadata)},
    * {@link #replace(Collection, Object)} and {@link #synchronize()}
    * methods.
    *
@@ -365,7 +365,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
 
   /**
    * Returns {@code true} if this {@link EventQueueCollection} has
-   * been populated via a call to {@link #add(Object, Event.Type,
+   * been populated via a call to {@link #add(Object, AbstractEvent.Type,
    * HasMetadata)} at some point, and if there are no {@link
    * EventQueue}s remaining to be {@linkplain #start(Consumer)
    * removed}.
@@ -375,14 +375,14 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * property</a>.</p>
    *
    * @return {@code true} if this {@link EventQueueCollection} has
-   * been populated via a call to {@link #add(Object, Event.Type,
+   * been populated via a call to {@link #add(Object, AbstractEvent.Type,
    * HasMetadata)} at some point, and if there are no {@link
    * EventQueue}s remaining to be {@linkplain #start(Consumer)
    * removed}; {@code false} otherwise
    *
    * @see #replace(Collection, Object)
    *
-   * @see #add(Object, Event.Type, HasMetadata)
+   * @see #add(Object, AbstractEvent.Type, HasMetadata)
    *
    * @see #synchronize()
    */
@@ -394,10 +394,9 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * <strong>Synchronizes on the {@code knownObjects} object</strong>
    * {@linkplain #EventQueueCollection(Map, int, float) supplied at
    * construction time}, if there is one, and, for every Kubernetes
-   * resource found within at the time of this call, {@linkplain
-   * #add(Object, Event.Type, HasMetadata) adds an <code>Event</code>}
-   * with an {@link Event.Type} of {@link Event.Type#SYNCHRONIZATION}
-   * for it.
+   * resource found within at the time of this call, adds a {@link
+   * SynchronizationEvent} for it with an {@link AbstractEvent.Type}
+   * of {@link AbstractEvent.Type#MODIFICATION}.
    */
   @Override
   public synchronized final void synchronize() {
@@ -421,7 +420,15 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
                 if (key != null) {
                   final EventQueue<T> eventQueue = this.map.get(key);
                   if (eventQueue == null || eventQueue.isEmpty()) {
-                    this.add(this, Event.Type.SYNCHRONIZATION, knownObject);
+                    // We make a SynchronizationEvent of type
+                    // MODIFICATION.  shared_informer.go checks in its
+                    // HandleDeltas function to see if oldObj exists;
+                    // if so, it's a modification.  Here we take
+                    // action *only if* the equivalent of oldObj
+                    // exists, therefore this is a
+                    // SynchronizationEvent of type MODIFICATION, not
+                    // ADDITION.
+                    this.synchronize(this, AbstractEvent.Type.MODIFICATION, knownObject, true /* yes, populate */);
                   }
                 }
               }
@@ -439,8 +446,8 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * At a high level, fully replaces the internal state of this {@link
    * EventQueueCollection} to reflect only the Kubernetes resources
    * contained in the supplied {@link Collection}, notionally firing
-   * {@link Event}s of type {@link Event.Type#SYNCHRONIZATION} and
-   * {@link Event.Type#DELETION} as appropriate.
+   * {@link SynchronizationEvent}s and {@link Event}s of type {@link
+   * AbstractEvent.Type#DELETION} as appropriate.
    *
    * <p>{@link EventQueue}s managed by this {@link
    * EventQueueCollection} that have not yet {@linkplain
@@ -463,12 +470,12 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * ignored; may be {@code null}
    *
    * @exception IllegalStateException if the {@link
-   * #createEvent(Object, Event.Type, HasMetadata)} method returns
+   * #createEvent(Object, AbstractEvent.Type, HasMetadata)} method returns
    * {@code null} for any reason
    *
-   * @see Event.Type#SYNCHRONIZATION
+   * @see SynchronizationEvent
    *
-   * @see #createEvent(Object, Event.Type, HasMetadata)
+   * @see #createEvent(Object, AbstractEvent.Type, HasMetadata)
    */
   @Override
   public synchronized final void replace(final Collection<? extends T> incomingResources, final Object resourceVersion) {
@@ -505,7 +512,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
           for (final T resource : incomingResources) {
             if (resource != null) {
               replacementKeys.add(this.getKey(resource));
-              this.add(this, Event.Type.SYNCHRONIZATION, resource, false);
+              this.synchronize(this, AbstractEvent.Type.ADDITION, resource, false);
             }
           }
         }
@@ -520,7 +527,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       for (final EventQueue<T> eventQueue : this.map.values()) {
         assert eventQueue != null;
         final Object key;
-        final Event<? extends T> newestEvent;
+        final AbstractEvent<? extends T> newestEvent;
         synchronized (eventQueue) {
           if (eventQueue.isEmpty()) {
             newestEvent = null;
@@ -561,7 +568,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
           // payloads.  See the deduplicate() method in EventQueue.
           final T resourceToBeDeleted = newestEvent.getResource();
           assert resourceToBeDeleted != null;
-          final Event<T> event = this.createEvent(this, Event.Type.DELETION, resourceToBeDeleted);
+          final Event<T> event = this.createEvent(this, AbstractEvent.Type.DELETION, resourceToBeDeleted);
           if (event == null) {
             throw new IllegalStateException("createEvent() == null");
           }
@@ -580,7 +587,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
               if (entry != null) {
                 final Object knownKey = entry.getKey();
                 if (!replacementKeys.contains(knownKey)) {
-                  final Event<T> event = this.createEvent(this, Event.Type.DELETION, entry.getValue());
+                  final Event<T> event = this.createEvent(this, AbstractEvent.Type.DELETION, entry.getValue());
                   if (event == null) {
                     throw new IllegalStateException("createEvent() == null");
                   }
@@ -728,7 +735,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
   /**
    * Semantically closes this {@link EventQueueCollection} by
    * detaching any {@link Consumer} previously attached via the {@link
-   * #start(Consumer)} method.  {@linkplain #add(Object, Event.Type,
+   * #start(Consumer)} method.  {@linkplain #add(Object, AbstractEvent.Type,
    * HasMetadata) Additions}, {@linkplain #replace(Collection, Object)
    * replacements} and {@linkplain #synchronize() synchronizations}
    * are still possible, but there won't be anything consuming any
@@ -902,7 +909,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    *
    * @return the created {@link Event}; never {@code null}
    */
-  protected Event<T> createEvent(final Object source, final Event.Type eventType, final T resource) {
+  protected Event<T> createEvent(final Object source, final AbstractEvent.Type eventType, final T resource) {
     final String cn = this.getClass().getName();
     final String mn = "createEvent";
     if (this.logger.isLoggable(Level.FINER)) {
@@ -912,7 +919,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     Objects.requireNonNull(source);
     Objects.requireNonNull(eventType);
     Objects.requireNonNull(resource);
-    final Event<T> returnValue = new Event<T>(source, eventType, null, resource);
+    final Event<T> returnValue = new Event<>(source, eventType, null, resource);
 
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn, returnValue);
@@ -920,6 +927,51 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     return returnValue;
   }
 
+  protected SynchronizationEvent<T> createSynchronizationEvent(final Object source, final AbstractEvent.Type eventType, final T resource) {
+    final String cn = this.getClass().getName();
+    final String mn = "createSynchronizationEvent";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, new Object[] { source, eventType, resource });
+    }
+
+    Objects.requireNonNull(source);
+    Objects.requireNonNull(eventType);
+    Objects.requireNonNull(resource);
+    final SynchronizationEvent<T> returnValue = new SynchronizationEvent<>(source, eventType, null, resource);
+
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, returnValue);
+    }
+    return returnValue;
+  }
+
+  private final SynchronizationEvent<T> synchronize(final Object source, final AbstractEvent.Type eventType, final T resource, final boolean populate) {
+    final String cn = this.getClass().getName();
+    final String mn = "synchronize";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn, new Object[] { source, eventType, resource });
+    }
+
+    Objects.requireNonNull(source);
+    Objects.requireNonNull(eventType);
+    Objects.requireNonNull(resource);
+
+    if (!(eventType.equals(AbstractEvent.Type.ADDITION) || eventType.equals(AbstractEvent.Type.MODIFICATION))) {
+      throw new IllegalArgumentException("Illegal eventType: " + eventType);
+    }
+
+    final SynchronizationEvent<T> event = this.createSynchronizationEvent(source, eventType, resource);
+    if (event == null) {
+      throw new IllegalStateException("createSynchronizationEvent() == null");
+    }
+    final SynchronizationEvent<T> returnValue = this.add(event, populate);
+
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn, returnValue);
+    }
+    return returnValue;
+  }
+  
   /**
    * Adds a new {@link Event} constructed out of the parameters
    * supplied to this method to this {@link EventQueueCollection} and
@@ -952,7 +1004,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * @see Event
    */
   @Override
-  public final Event<T> add(final Object source, final Event.Type eventType, final T resource) {
+  public final Event<T> add(final Object source, final AbstractEvent.Type eventType, final T resource) {
     return this.add(source, eventType, resource, true);
   }
 
@@ -991,7 +1043,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    *
    * @see Event
    */
-  private final Event<T> add(final Object source, final Event.Type eventType, final T resource, final boolean populate) {
+  private final Event<T> add(final Object source, final AbstractEvent.Type eventType, final T resource, final boolean populate) {
     final String cn = this.getClass().getName();
     final String mn = "add";
     if (this.logger.isLoggable(Level.FINER)) {
@@ -1022,6 +1074,9 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * Event} that will be added, and then adds the new {@link Event} to
    * the queue.</p>
    *
+   * @param <E> an {@link AbstractEvent} type that is both consumed
+   * and returned
+   *
    * @param event the {@link Event} to add; must not be {@code null}
    *
    * @param populate if {@code true} then this {@link
@@ -1037,7 +1092,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    *
    * @see Event
    */
-  private final Event<T> add(final Event<T> event, final boolean populate) {
+  private final <E extends AbstractEvent<T>> E add(final E event, final boolean populate) {
     final String cn = this.getClass().getName();
     final String mn = "add";
     if (this.logger.isLoggable(Level.FINER)) {
@@ -1050,7 +1105,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       throw new IllegalArgumentException("event.getKey() == null");
     }
     
-    Event<T> returnValue = null;
+    E returnValue = null;
     EventQueue<T> eventQueue;
     synchronized (this) {
       if (populate) {

@@ -56,7 +56,7 @@ import org.microbean.development.annotation.NonBlocking;
 
 /**
  * A pump of sorts that continuously "pulls" logical events out of
- * Kubernetes and {@linkplain EventCache#add(Object, Event.Type,
+ * Kubernetes and {@linkplain EventCache#add(Object, AbstractEvent.Type,
  * HasMetadata) adds them} to an {@link EventCache} so as to logically
  * "reflect" the contents of Kubernetes into the cache.
  *
@@ -447,8 +447,8 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * resources, and then, on a separate {@link Thread}, {@linkplain
    * VersionWatchable sets up a watch} on them, calling {@link
    * EventCache#replace(Collection, Object)} and {@link
-   * EventCache#add(Object, Event.Type, HasMetadata)} methods as
-   * appropriate.
+   * EventCache#add(Object, AbstractEvent.Type, HasMetadata)} methods
+   * as appropriate.
    *
    * <p>The calling {@link Thread} is not blocked by invocations of
    * this method.</p>
@@ -562,7 +562,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     
 
     /**
-     * Calls the {@link EventCache#add(Object, Event.Type,
+     * Calls the {@link EventCache#add(Object, AbstractEvent.Type,
      * HasMetadata)} method on the enclosing {@link Reflector}'s
      * associated {@link EventCache} with information harvested from
      * the supplied {@code resource}, and using an {@link Event.Type}

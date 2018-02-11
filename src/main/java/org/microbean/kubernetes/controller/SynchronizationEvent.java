@@ -25,9 +25,8 @@ import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 
 /**
- * An {@link AbstractEvent} that represents another event that has
- * occurred to a Kubernetes resource, usually as found in an {@link
- * EventCache} implementation.
+ * An {@link AbstractEvent} that describes an {@link EventCache}
+ * synchronization event.
  *
  * @param <T> a type of Kubernetes resource
  *
@@ -36,7 +35,7 @@ import io.fabric8.kubernetes.api.model.ObjectMeta;
  *
  * @see EventCache
  */
-public class Event<T extends HasMetadata> extends AbstractEvent<T> {
+public class SynchronizationEvent<T extends HasMetadata> extends AbstractEvent<T> {
 
 
   /*
@@ -59,12 +58,13 @@ public class Event<T extends HasMetadata> extends AbstractEvent<T> {
 
 
   /**
-   * Creates a new {@link Event}.
+   * Creates a new {@link SynchronizationEvent}.
    *
    * @param source the creator; must not be {@code null}
    *
-   * @param type the {@link Type} of this {@link Event}; must not be
-   * {@code null}
+   * @param type the {@link Type} of this {@link
+   * SynchronizationEvent}; must not be {@code null}; must not be
+   * {@link Type#DELETION}
    *
    * @param priorResource a {@link HasMetadata} representing the
    * <em>prior state</em> of the {@linkplain #getResource() Kubernetes
@@ -77,12 +77,18 @@ public class Event<T extends HasMetadata> extends AbstractEvent<T> {
    * @exception NullPointerException if {@code source}, {@code type}
    * or {@code resource} is {@code null}
    *
+   * @exception IllegalArgumentException if {@link Type#DELETION} is
+   * equal to {@code type}
+   *
    * @see Type
    *
    * @see EventObject#getSource()
    */
-  protected Event(final Object source, final Type type, final T priorResource, final T resource) {
+  protected SynchronizationEvent(final Object source, final Type type, final T priorResource, final T resource) {
     super(source, type, priorResource, resource);
+    if (Type.DELETION.equals(type)) {
+      throw new IllegalArgumentException("DELETION.equals(type): " + type);
+    }
   }
 
 
@@ -92,21 +98,22 @@ public class Event<T extends HasMetadata> extends AbstractEvent<T> {
 
 
   /**
-   * Returns {@code true} if the supplied {@link Object} is also an
-   * {@link Event} and is equal in every respect to this one.
+   * Returns {@code true} if the supplied {@link Object} is also a
+   * {@link SynchronizationEvent} and is equal in every respect to
+   * this one.
    *
    * @param other the {@link Object} to test; may be {@code null} in
    * which case {@code false} will be returned
    *
-   * @return {@code true} if the supplied {@link Object} is also an
-   * {@link Event} and is equal in every respect to this one; {@code
-   * false} otherwise
+   * @return {@code true} if the supplied {@link Object} is also a
+   * {@link SynchronizationEvent} and is equal in every respect to
+   * this one; {@code false} otherwise
    */
   @Override
   public boolean equals(final Object other) {
     if (other == this) {
       return true;
-    } else if (other instanceof Event) {
+    } else if (other instanceof SynchronizationEvent) {
 
       final boolean superEquals = super.equals(other);
       if (!superEquals) {
