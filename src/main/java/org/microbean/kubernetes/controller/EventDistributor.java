@@ -34,6 +34,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import java.util.concurrent.locks.Lock;
@@ -114,6 +116,8 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
         .forEach(distributor -> {
             distributor.close();
           });
+      this.synchronizingDistributors.clear();
+      this.distributors.clear();
     } finally {
       this.writeLock.unlock();
     }
@@ -183,23 +187,41 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
 
   private static final class Pump<T extends HasMetadata> implements Consumer<AbstractEvent<? extends T>>, Closeable {
 
+    private volatile boolean closing;
+    
     private volatile Instant nextSynchronizationInstant;
     
     private volatile Duration synchronizationInterval;
     
     final BlockingQueue<AbstractEvent<? extends T>> queue;
     
-    private final Executor executor;
+    private final ScheduledExecutorService executor;
     
     private final Consumer<? super AbstractEvent<? extends T>> eventConsumer;
     
     private Pump(final Duration synchronizationInterval, final Consumer<? super AbstractEvent<? extends T>> eventConsumer) {
       super();
       Objects.requireNonNull(eventConsumer);
-      this.queue = new LinkedBlockingQueue<>();
-      this.executor = Executors.newSingleThreadExecutor();
-      this.setSynchronizationInterval(synchronizationInterval);
       this.eventConsumer = eventConsumer;
+      this.executor = this.createScheduledThreadPoolExecutor();
+      if (this.executor == null) {
+        throw new IllegalStateException("createScheduledThreadPoolExecutor() == null");
+      }
+      this.queue = new LinkedBlockingQueue<>();
+      this.executor.scheduleWithFixedDelay(() -> {
+          try {
+            this.eventConsumer.accept(this.queue.take());
+          } catch (final InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+          }
+        }, 0L, 0L, TimeUnit.MILLISECONDS);
+      this.setSynchronizationInterval(synchronizationInterval);
+    }
+
+    private final ScheduledExecutorService createScheduledThreadPoolExecutor() {
+      final ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1);
+      executor.setRemoveOnCancelPolicy(true);
+      return executor;
     }
     
     final Consumer<? super AbstractEvent<? extends T>> getEventConsumer() {
@@ -215,40 +237,30 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
      */
     @Override
     public final void accept(final AbstractEvent<? extends T> event) {
+      if (this.closing) {
+        throw new IllegalStateException();
+      }
       if (event != null) {
         final boolean added = this.queue.add(event);
         assert added;
-        this.executor.execute(() -> {
-            try {
-              this.fireEvent(this.queue.take());
-            } catch (final InterruptedException interruptedException) {
-              Thread.currentThread().interrupt();
-            }
-          });
       }
     }
     
     @Override
     public void close() {
-      if (this.executor instanceof ExecutorService) {
-        final ExecutorService executorService = (ExecutorService)this.executor;
-        executorService.shutdown();
-        try {
-          if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
-            executorService.shutdownNow();
-            if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
-              // TODO: log
-            }
+      this.closing = true;
+      this.executor.shutdown();
+      try {
+        if (!this.executor.awaitTermination(60, TimeUnit.SECONDS)) {
+          this.executor.shutdownNow();
+          if (!this.executor.awaitTermination(60, TimeUnit.SECONDS)) {
+            // TODO: log
           }
-        } catch (final InterruptedException interruptedException) {
-          executorService.shutdownNow();
-          Thread.currentThread().interrupt();
         }
+      } catch (final InterruptedException interruptedException) {
+        this.executor.shutdownNow();
+        Thread.currentThread().interrupt();
       }
-    }
-    
-    private final void fireEvent(final AbstractEvent<? extends T> event) {
-      this.eventConsumer.accept(event);
     }
     
     

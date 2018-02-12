@@ -34,6 +34,15 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.Spliterator;
 
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+
 import java.util.function.Consumer;
 
 import java.util.logging.Level;
@@ -132,22 +141,6 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
   private int initialPopulationCount;
 
   /**
-   * A {@link Thread}, created by the {@link #start(Consumer)} method,
-   * that will eternally invoke the {@link #attach(Consumer)} method.
-   *
-   * <p>This field may be {@code null}.</p>
-   *
-   * <p>Mutations of this field must be synchronized on {@code
-   * this}.</p>
-   *
-   * @see #start(Consumer)
-   *
-   * @see #attach(Consumer)
-   */
-  @GuardedBy("this")
-  private Thread consumerThread;
-
-  /**
    * A {@link LinkedHashMap} of {@link EventQueue} instances, indexed
    * by {@linkplain EventQueue#getKey() their keys}.
    *
@@ -179,6 +172,9 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
   @GuardedBy("itself")
   private final Map<?, ? extends T> knownObjects;
 
+  @GuardedBy("this")
+  private ScheduledExecutorService consumerExecutor;
+  
   /**
    * A {@link Logger} used by this {@link EventQueueCollection}.
    *
@@ -344,7 +340,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    */
   @Override
   public synchronized final Spliterator<EventQueue<T>> spliterator() {
-    return this.map.values().spliterator();
+    return Collections.unmodifiableMap(this.map).values().spliterator();
   }
 
   /**
@@ -714,22 +710,24 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     
     Objects.requireNonNull(siphon);
     synchronized (this) {
-      if (this.consumerThread == null) {
-        this.consumerThread = new Thread(() -> {
-            try {
-              attach(siphon);
-            } catch (final InterruptedException interruptedException) {
-              Thread.currentThread().interrupt();
-            }
-          });
-        this.consumerThread.setDaemon(true);
-        this.consumerThread.start();
+      if (this.consumerExecutor == null) {
+        this.consumerExecutor = this.createScheduledThreadPoolExecutor();
+        if (this.consumerExecutor == null) {
+          throw new IllegalStateException();
+        }
+        this.consumerExecutor.scheduleWithFixedDelay(this.consumeOneEventQueue(siphon), 0L, 0L, TimeUnit.MILLISECONDS);
       }
     }
     
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
     }
+  }
+
+  private final ScheduledThreadPoolExecutor createScheduledThreadPoolExecutor() {
+    final ScheduledThreadPoolExecutor returnValue = new ScheduledThreadPoolExecutor(1);
+    returnValue.setRemoveOnCancelPolicy(true);
+    return returnValue;
   }
 
   /**
@@ -753,25 +751,29 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
-    
-    final Thread consumerThread;
+
+    final ExecutorService consumerExecutor;
     synchronized (this) {
-      consumerThread = this.consumerThread;
-      if (consumerThread != null) {
-        this.closing = true;
-        this.consumerThread.interrupt();
+      this.closing = true;
+      if (this.consumerExecutor instanceof ExecutorService) {
+        consumerExecutor = (ExecutorService)this.consumerExecutor;
+      } else {
+        consumerExecutor = null;
       }
     }
-    if (consumerThread != null) {
+
+    if (consumerExecutor != null) {
+      consumerExecutor.shutdown();
       try {
-        consumerThread.join();
-      } catch (final InterruptedException interruptedException) {
-        Thread.currentThread().interrupt();
-      } finally {
-        synchronized (this) {
-          this.consumerThread = null;
-          this.closing = false;
+        if (!consumerExecutor.awaitTermination(60, TimeUnit.SECONDS)) {
+          consumerExecutor.shutdownNow();
+          if (!consumerExecutor.awaitTermination(60, TimeUnit.SECONDS)) {
+            // TODO: log
+          }
         }
+      } catch (final InterruptedException interruptedException) {
+        consumerExecutor.shutdownNow();
+        Thread.currentThread().interrupt();
       }
     }
 
@@ -780,82 +782,53 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     }
   }
 
-  /**
-   * <strong>Blocks the current thread</strong> and removes and
-   * funnels current and future {@link EventQueue}s belonging to this
-   * {@link EventQueueCollection} into the supplied {@link Consumer},
-   * blocking if necessary until there are new {@link EventQueue}s in
-   * this {@link EventQueueCollection} for the supplied {@link
-   * Consumer} to consume.
-   *
-   * <p>The supplied {@link Consumer} may call any method on the
-   * {@link EventQueue} supplied to it without synchronization as the
-   * {@link EventQueue}'s monitor is obtained by the {@link Thread}
-   * invoking the {@link Consumer}.</p>
-   *
-   * @param siphon a {@link Consumer} that can process an {@link
-   * EventQueue} or its superclasses; must not be {@code null}
-   *
-   * @exception NullPointerException if {@code consumer} is {@code null}
-   *
-   * @exception InterruptedException if the {@link Thread} currently
-   * occupied with this method invocation was {@linkplain
-   * Thread#interrupt() interrupted}
-   */
-  @Blocking
-  private final void attach(final Consumer<? super EventQueue<? extends T>> siphon) throws InterruptedException {
-    final String cn = this.getClass().getName();
-    final String mn = "attach";
-    if (this.logger.isLoggable(Level.FINER)) {
-      this.logger.entering(cn, mn, siphon);
-    }
-    
+  private final Runnable consumeOneEventQueue(final Consumer<? super EventQueue<? extends T>> siphon) {
     Objects.requireNonNull(siphon);
-    while (!this.closing) {
+    final Runnable returnValue = () -> {
       synchronized (this) {
-        @Blocking
         final EventQueue<T> eventQueue = this.take();
-        if (eventQueue != null) {
+        if (eventQueue == null) {
+          assert this.closing;
+          assert this.isEmpty();
+        } else {
           synchronized (eventQueue) {
             try {
               siphon.accept(eventQueue);
-            } catch (final TransientException transientException) {
-              this.map.putIfAbsent(eventQueue.getKey(), eventQueue);
+            } catch (final TransientException transientException) {              
+              final Object previousValue = this.map.putIfAbsent(eventQueue.getKey(), eventQueue);
+              // TODO: if we end up NOT using a *scheduled* executor, then make sure:
+              // if (previousValue == null) {
+              //   this.consumerExecutor.execute(this.consumeOneEventQueue(siphon));
+              // }
             }
           }
         }
       }
-    }
-
-    if (this.logger.isLoggable(Level.FINER)) {
-      this.logger.exiting(cn, mn);
-    }
+    };
+    return returnValue;
   }
 
   @Blocking
-  private synchronized final EventQueue<T> take() throws InterruptedException {
+  private synchronized final EventQueue<T> take() {
     final String cn = this.getClass().getName();
     final String mn = "take";
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
 
-    while (!this.closing && this.isEmpty()) {
+    while (this.isEmpty() && !this.closing) {
       try {
         this.wait();
       } catch (final InterruptedException interruptedException) {
-        if (this.closing) {
-          throw interruptedException;
-        }
         Thread.currentThread().interrupt();
       }
     }
     assert this.populated : "this.populated == false";
     final EventQueue<T> returnValue;
-    if (this.closing) {
+    if (this.isEmpty()) {
+      assert this.closing : "this.isEmpty() && !this.closing";
       returnValue = null;
     } else {
-      assert !this.isEmpty();
       final Iterator<EventQueue<T>> iterator = this.map.values().iterator();
       assert iterator != null;
       assert iterator.hasNext();
@@ -869,11 +842,10 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         final int oldInitialPopulationCount = this.initialPopulationCount;
         this.initialPopulationCount--;
         this.firePropertyChange("initialPopulationCount", oldInitialPopulationCount, this.initialPopulationCount);
-        if (this.isSynchronized()) {
-          this.firePropertyChange("synchronized", false, true);
-        }
+        this.firePropertyChange("synchronized", false, this.isSynchronized());
       }
-    }      
+      this.firePropertyChange("empty", false, this.isEmpty());
+    }
     
     if (this.logger.isLoggable(Level.FINER)) {
       final String eventQueueString;
@@ -1098,6 +1070,10 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn, new Object[] { event, Boolean.valueOf(populate) });
     }
+
+    if (this.closing) {
+      throw new IllegalStateException();
+    }
     
     Objects.requireNonNull(event);
     final Object key = event.getKey();
@@ -1130,10 +1106,16 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
           // result in an empty queue.
           if (eventQueueExisted) {
             returnValue = null;
+            // TODO: when we switch to consumerExecutor, a task might
+            // already have been submitted for this key.  There isn't
+            // a good way to retrieve it and cancel it.
             this.map.remove(key);
           }
         } else if (!eventQueueExisted) {
           this.map.put(key, eventQueue);
+          // TODO: when we switch to consumerExecutor, schedule a
+          // consumption task IF consumerExecutor is not a scheduled
+          // executor
         }
       }
       this.notifyAll();

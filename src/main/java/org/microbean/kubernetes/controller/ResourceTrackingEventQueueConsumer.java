@@ -214,13 +214,10 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
                   priorResource = this.knownObjects.put(key, newResource);
                   if (event instanceof SynchronizationEvent) {
                     if (priorResource == null) {
-                      if (Event.Type.ADDITION.equals(eventType)) {
-                        newEvent = event;
-                      } else {
-                        newEvent = null;
-                        assert false;
-                      }
+                      assert Event.Type.ADDITION.equals(eventType) : "!Event.Type.ADDITION.equals(eventType): " + eventType;
+                      newEvent = event;
                     } else {
+                      assert Event.Type.MODIFICATION.equals(eventType) : "!Event.Type.MODIFICATION.equals(eventType): " + eventType;
                       newEvent = this.createSynchronizationEvent(Event.Type.MODIFICATION, priorResource, newResource);
                     }
                   } else if (priorResource == null) {
