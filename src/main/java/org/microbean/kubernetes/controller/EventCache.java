@@ -26,8 +26,8 @@ import io.fabric8.kubernetes.api.model.HasMetadata;
  *
  * <h2>Thread Safety</h2>
  *
- * <p><strong>Implementations of this interface must be safe for
- * concurrent usage by multiple {@link Thread}s.</strong></p>
+ * <p><strong>Instances of implementations of this interface must be
+ * safe for concurrent usage by multiple {@link Thread}s.</strong></p>
  *
  * @param <T> a type of Kubernetes resource
  *

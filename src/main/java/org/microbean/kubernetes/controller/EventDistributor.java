@@ -61,6 +61,8 @@ import net.jcip.annotations.ThreadSafe;
  * <p>{@link EventDistributor} instances must be {@linkplain #close()
  * closed} and discarded after use.</p>
  *
+ * @param <T> a type of Kubernetes resource
+ *
  * @author <a href="https://about.me/lairdnelson"
  * target="_parent">Laird Nelson</a>
  *

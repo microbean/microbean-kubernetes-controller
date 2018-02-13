@@ -29,9 +29,9 @@ import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 
 /**
- * An {@link EventObject} that represents another event that has
- * occurred to a Kubernetes resource, usually as found in an {@link
- * EventCache} implementation.
+ * An {@code abstract} {@link EventObject} that represents another
+ * event that has occurred to a Kubernetes resource, usually as found
+ * in an {@link EventCache} implementation.
  *
  * @param <T> a type of Kubernetes resource
  *
@@ -76,7 +76,8 @@ public abstract class AbstractEvent<T extends HasMetadata> extends EventObject {
   private volatile Object key;
 
   /**
-   * The {@link Type} describing the type of this {@link AbstractEvent}.
+   * The {@link Type} describing the type of this {@link
+   * AbstractEvent}.
    *
    * <p>This field is never {@code null}.</p>
    *
@@ -115,11 +116,13 @@ public abstract class AbstractEvent<T extends HasMetadata> extends EventObject {
 
 
   /**
-   * Private zero-argument constructor to reinforce to readers and
+   * A private zero-argument constructor to reinforce to readers and
    * subclassers alike that this is not only an {@code abstract}
-   * class, but one with a concrete number of subclasses.
+   * class, but one with a finite, known number of subclasses.
    *
    * @exception NullPointerException when invoked
+   *
+   * @see #AbstractEvent(Object, Type, HasMetadata, HasMetadata)
    */
   private AbstractEvent() {
     this(null, null, null, null);
@@ -145,8 +148,8 @@ public abstract class AbstractEvent<T extends HasMetadata> extends EventObject {
    * or {@code resource} is {@code null}
    *
    * @exception IllegalStateException if somehow a subclass invoking
-   * this constructor is neither an instance of {@link Event} nor an
-   * instance of {@link SynchronizationEvent}
+   * this constructor manages illicitly to be neither an instance of
+   * {@link Event} nor an instance of {@link SynchronizationEvent}
    *
    * @see Type
    *

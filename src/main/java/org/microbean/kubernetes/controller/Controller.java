@@ -43,6 +43,7 @@ import io.fabric8.kubernetes.client.dsl.Listable;
 import io.fabric8.kubernetes.client.dsl.VersionWatchable;
 
 import net.jcip.annotations.Immutable;
+import net.jcip.annotations.ThreadSafe;
 
 import org.microbean.development.annotation.NonBlocking;
 
@@ -72,6 +73,11 @@ import org.microbean.development.annotation.NonBlocking;
  * customization easier; none require overriding and their default
  * behavior is usually just fine.</p>
  *
+ * <h2>Thread Safety</h2>
+ *
+ * <p>Instances of this class are safe for concurrent use by multiple
+ * threads.</p>
+ *
  * @param <T> a Kubernetes resource type
  *
  * @author <a href="https://about.me/lairdnelson"
@@ -88,6 +94,7 @@ import org.microbean.development.annotation.NonBlocking;
  * @see #close()
  */
 @Immutable
+@ThreadSafe
 public class Controller<T extends HasMetadata> implements Closeable {
 
 
