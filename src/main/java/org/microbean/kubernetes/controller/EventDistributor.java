@@ -16,7 +16,6 @@
  */
 package org.microbean.kubernetes.controller;
 
-import java.io.Closeable;
 import java.io.IOException;
 
 import java.time.Duration;
@@ -50,9 +49,33 @@ import net.jcip.annotations.Immutable;
 import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.ThreadSafe;
 
+/**
+ * A {@link ResourceTrackingEventQueueConsumer} that {@linkplain
+ * ResourceTrackingEventQueueConsumer#accept(EventQueue) consumes
+ * <tt>EventQueue</tt> instances} by feeding each {@link
+ * AbstractEvent} in the {@link EventQueue} being consumed to {@link
+ * Consumer}s of {@link AbstractEvent}s that have been {@linkplain
+ * #addConsumer(Consumer) registered}.
+ *
+ * <p>{@link EventDistributor} instances must be {@linkplain #close()
+ * closed} and discarded after use.</p>
+ *
+ * @author <a href="https://about.me/lairdnelson"
+ * target="_parent">Laird Nelson</a>
+ *
+ * @see #addConsumer(Consumer)
+ *
+ * @see #removeConsumer(Consumer)
+ */
 @Immutable
 @ThreadSafe
-public final class EventDistributor<T extends HasMetadata> extends ResourceTrackingEventQueueConsumer<T> implements Closeable {
+public final class EventDistributor<T extends HasMetadata> extends ResourceTrackingEventQueueConsumer<T> implements AutoCloseable {
+
+
+  /*
+   * Instance fields.
+   */
+  
 
   @GuardedBy("readLock && writeLock")
   private final Collection<Pump<T>> distributors;
@@ -65,7 +88,24 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
   private final Lock readLock;
 
   private final Lock writeLock;
-  
+
+
+  /*
+   * Constructors.
+   */
+
+
+  /**
+   * Creates a new {@link EventDistributor}.
+   *
+   * @param knownObjects a mutable {@link Map} of Kubernetes resources
+   * that contains or will contain Kubernetes resources known to this
+   * {@link EventDistributor} and whatever mechanism (such as a {@link
+   * Controller}) is feeding it; may be {@code null}
+   *
+   * @see
+   * ResourceTrackingEventQueueConsumer#ResourceTrackingEventQueueConsumer(Map)
+   */
   public EventDistributor(final Map<Object, T> knownObjects) {
     super(knownObjects);
     final ReadWriteLock lock = new ReentrantReadWriteLock();
@@ -76,6 +116,26 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     this.synchronizationInterval = null; // TODO: implement/fix
   }
 
+
+  /*
+   * Instance methods.
+   */
+  
+
+  /**
+   * Adds the supplied {@link Consumer} to this {@link
+   * EventDistributor} as a listener that will be notified of each
+   * {@link AbstractEvent} this {@link EventDistributor} receives.
+   *
+   * <p>The supplied {@link Consumer}'s {@link
+   * Consumer#accept(Object)} method may be called later on a separate
+   * thread of execution.</p>
+   *
+   * @param consumer a {@link Consumer} of {@link AbstractEvent}s; may
+   * be {@code null} in which case no action will be taken
+   *
+   * @see #removeConsumer(Consumer)
+   */
   public final void addConsumer(final Consumer<? super AbstractEvent<? extends T>> consumer) {
     if (consumer != null) {
       this.writeLock.lock();
@@ -89,6 +149,16 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     }
   }
 
+  /**
+   * Removes any {@link Consumer} {@linkplain Object#equals(Object)
+   * equal to} a {@link Consumer} previously {@linkplain
+   * #addConsumer(Consumer) added} to this {@link EventDistributor}.
+   *
+   * @param consumer the {@link Consumer} to remove; may be {@code
+   * null} in which case no action will be taken
+   *
+   * @see #addConsumer(Consumer)
+   */
   public final void removeConsumer(final Consumer<? super AbstractEvent<? extends T>> consumer) {
     if (consumer != null) {
       this.writeLock.lock();
@@ -108,6 +178,10 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     }
   }
 
+  /**
+   * Releases resources held by this {@link EventDistributor} during
+   * its execution.
+   */
   @Override
   public final void close() {
     this.writeLock.lock();
@@ -123,6 +197,23 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     }
   }
 
+  /**
+   * Returns {@code true} if this {@link EventDistributor} should
+   * <em>synchronize</em> with its upstream source.
+   *
+   * <h2>Design Notes</h2>
+   *
+   * <p>The Kubernetes {@code tools/cache} package spreads
+   * synchronization out among the reflector, controller, event cache
+   * and event processor constructs for no seemingly good reason.
+   * They should probably be consolidated, particularly in an
+   * object-oriented environment such as Java.</p>
+   *
+   * @return {@code true} if synchronization should occur; {@code
+   * false} otherwise
+   *
+   * @see EventCache#synchronize()
+   */
   public final boolean shouldSynchronize() {
     boolean returnValue = false;
     this.writeLock.lock();
@@ -142,6 +233,17 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     return returnValue;
   }
 
+  /**
+   * Consumes the supplied {@link AbstractEvent} by forwarding it to
+   * the {@link Consumer#accept(Object)} method of each {@link
+   * Consumer} {@linkplain #addConsumer(Consumer) registered} with
+   * this {@link EventDistributor}.
+   *
+   * @param event the {@link AbstractEvent} to forward; may be {@code
+   * null} in which case no action is taken
+   *
+   * @see #addConsumer(Consumer)
+   */
   @Override
   protected final void accept(final AbstractEvent<? extends T> event) {
     if (event != null) {
@@ -185,7 +287,16 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
    */
   
 
-  private static final class Pump<T extends HasMetadata> implements Consumer<AbstractEvent<? extends T>>, Closeable {
+  /**
+   * A {@link Consumer} of {@link AbstractEvent} instances that puts
+   * them on an internal queue and, in a separate thread, removes them
+   * from the queue and forwards them to the "real" {@link Consumer}
+   * supplied at construction time.
+   *
+   * @author <a href="https://about.me/lairdnelson"
+   * target="_parent">Laird Nelson</a>
+   */
+  private static final class Pump<T extends HasMetadata> implements Consumer<AbstractEvent<? extends T>>, AutoCloseable {
 
     private volatile boolean closing;
     

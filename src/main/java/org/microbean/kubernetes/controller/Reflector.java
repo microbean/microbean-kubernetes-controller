@@ -397,9 +397,9 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   }
 
   /**
-   * Whether, at any given moment, this {@link Reflector} should cause
-   * its {@link EventCache} to {@linkplain EventCache#synchronize()
-   * synchronize}.
+   * Returns whether, at any given moment, this {@link Reflector}
+   * should cause its {@link EventCache} to {@linkplain
+   * EventCache#synchronize() synchronize}.
    *
    * <h2>Design Notes</h2>
    *

@@ -84,7 +84,7 @@ public class SynchronizationEvent<T extends HasMetadata> extends AbstractEvent<T
    *
    * @see EventObject#getSource()
    */
-  protected SynchronizationEvent(final Object source, final Type type, final T priorResource, final T resource) {
+  public SynchronizationEvent(final Object source, final Type type, final T priorResource, final T resource) {
     super(source, type, priorResource, resource);
     if (Type.DELETION.equals(type)) {
       throw new IllegalArgumentException("DELETION.equals(type): " + type);

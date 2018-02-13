@@ -36,6 +36,8 @@ import net.jcip.annotations.GuardedBy;
  * <p>Typically you would supply an implementation of this class to a
  * {@link Controller}.</p>
  *
+ * @param <T> a Kubernetes resource type
+ *
  * @author <a href="https://about.me/lairdnelson"
  * target="_parent">Laird Nelson</a>
  *
@@ -195,9 +197,8 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
             final Event.Type eventType = event.getType();
             assert eventType != null;            
             final T newResource = event.getResource();
-            if (event.getPriorResource() != null) {
-              // TODO: unexpected state, but should just be ignored or
-              // logged
+            if (event.getPriorResource() != null && this.logger.isLoggable(Level.FINE)) {
+              this.logger.logp(Level.FINE, cn, mn, "Unexpected state; event has a priorResource: {0}", event.getPriorResource());
             }
             final T priorResource;
             final AbstractEvent<? extends T> newEvent;
@@ -245,6 +246,31 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
     }
   }
 
+  /**
+   * Creates and returns a new {@link Event}.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>Overrides of this method must not return {@code null}.</p>
+   *
+   * @param eventType the {@link AbstractEvent.Type} for the new
+   * {@link Event}; must not be {@code null}; when supplied by the
+   * {@link #accept(EventQueue)} method's internals, will always be
+   * either {@link AbstractEvent.Type#ADDITION} or {@link
+   * AbstractEvent.Type#MODIFICATION}
+   *
+   * @param priorResource the prior state of the resource the new
+   * {@link Event} will represent; may be (and often is) {@code null}
+   *
+   * @param resource the latest state of the resource the new {@link
+   * Event} will represent; must not be {@code null}
+   *
+   * @return a new, non-{@code null} {@link Event} with each
+   * invocation
+   *
+   * @exception NullPointerException if {@code eventType} or {@code
+   * resource} is {@code null}
+   */
   protected Event<T> createEvent(final Event.Type eventType, final T priorResource, final T resource) {
     final String cn = this.getClass().getName();
     final String mn = "createEvent";
@@ -259,6 +285,31 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
     return returnValue;
   }
 
+  /**
+   * Creates and returns a new {@link SynchronizationEvent}.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>Overrides of this method must not return {@code null}.</p>
+   *
+   * @param eventType the {@link AbstractEvent.Type} for the new
+   * {@link SynchronizationEvent}; must not be {@code null}; when
+   * supplied by the {@link #accept(EventQueue)} method's internals,
+   * will always be {@link AbstractEvent.Type#MODIFICATION}
+   *
+   * @param priorResource the prior state of the resource the new
+   * {@link SynchronizationEvent} will represent; may be (and often
+   * is) {@code null}
+   *
+   * @param resource the latest state of the resource the new {@link
+   * SynchronizationEvent} will represent; must not be {@code null}
+   *
+   * @return a new, non-{@code null} {@link SynchronizationEvent} with
+   * each invocation
+   *
+   * @exception NullPointerException if {@code eventType} or {@code
+   * resource} is {@code null}
+   */
   protected SynchronizationEvent<T> createSynchronizationEvent(final Event.Type eventType, final T priorResource, final T resource) {
     final String cn = this.getClass().getName();
     final String mn = "createSynchronizationEvent";

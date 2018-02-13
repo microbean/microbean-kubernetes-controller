@@ -424,40 +424,4 @@ public abstract class AbstractEvent<T extends HasMetadata> extends EventObject {
 
   }
 
-  public static final class Listener<T extends HasMetadata> implements EventListener {
-
-    private volatile Instant nextSynchronizationInstant;
-
-    private volatile Duration synchronizationInterval;
-    
-    public Listener() {
-      super();
-    }
-    
-    public void onEvent(final AbstractEvent<T> event) {
-      
-    }
-
-    public boolean shouldSynchronize(Instant now) {
-      if (now == null) {
-        now = Instant.now();
-      }
-      final Duration interval = this.synchronizationInterval;
-      final boolean returnValue = interval != null && !interval.isZero() && now.compareTo(this.nextSynchronizationInstant) >= 0;
-      return returnValue;
-    }
-
-    public void determineNextSynchronizationInterval(Instant now) {
-      if (now == null) {
-        now = Instant.now();
-      }
-      this.nextSynchronizationInstant = now.plus(this.synchronizationInterval);
-    }
-
-    public void setSynchronizationInterval(final Duration synchronizationInterval) {
-      this.synchronizationInterval = synchronizationInterval;
-    }
-    
-  }
-  
 }

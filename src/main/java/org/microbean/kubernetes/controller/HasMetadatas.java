@@ -28,6 +28,8 @@ import io.fabric8.kubernetes.api.model.ObjectMeta;
  * @author <a href="https://about.me/lairdnelson"
  * target="_parent">Laird Nelson</a>
  *
+ * @see #getKey(HasMetadata)
+ *
  * @see HasMetadata
  */
 public final class HasMetadatas {

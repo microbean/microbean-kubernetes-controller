@@ -81,7 +81,7 @@ public class Event<T extends HasMetadata> extends AbstractEvent<T> {
    *
    * @see EventObject#getSource()
    */
-  protected Event(final Object source, final Type type, final T priorResource, final T resource) {
+  public Event(final Object source, final Type type, final T priorResource, final T resource) {
     super(source, type, priorResource, resource);
   }
 
