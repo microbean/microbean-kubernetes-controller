@@ -31,6 +31,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
@@ -307,6 +308,8 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     final BlockingQueue<AbstractEvent<? extends T>> queue;
     
     private final ScheduledExecutorService executor;
+
+    private final Future<?> task;
     
     private final Consumer<? super AbstractEvent<? extends T>> eventConsumer;
     
@@ -319,13 +322,15 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
         throw new IllegalStateException("createScheduledThreadPoolExecutor() == null");
       }
       this.queue = new LinkedBlockingQueue<>();
-      this.executor.scheduleWithFixedDelay(() -> {
+      this.task = this.executor.scheduleWithFixedDelay(() -> {
           try {
-            this.eventConsumer.accept(this.queue.take());
+            while (!Thread.currentThread().isInterrupted()) {
+              this.eventConsumer.accept(this.queue.take());
+            }
           } catch (final InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
           }
-        }, 0L, 0L, TimeUnit.MILLISECONDS);
+        }, 0L, 1L, TimeUnit.SECONDS);
       this.setSynchronizationInterval(synchronizationInterval);
     }
 
@@ -335,7 +340,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
       return executor;
     }
     
-    final Consumer<? super AbstractEvent<? extends T>> getEventConsumer() {
+    private final Consumer<? super AbstractEvent<? extends T>> getEventConsumer() {
       return this.eventConsumer;
     }
     
@@ -358,9 +363,10 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     }
     
     @Override
-    public void close() {
+    public final void close() {
       this.closing = true;
       this.executor.shutdown();
+      this.task.cancel(true);
       try {
         if (!this.executor.awaitTermination(60, TimeUnit.SECONDS)) {
           this.executor.shutdownNow();
@@ -383,7 +389,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
      */
     
     
-    public final boolean shouldSynchronize(Instant now) {
+    private final boolean shouldSynchronize(Instant now) {
       if (now == null) {
         now = Instant.now();
       }
@@ -392,18 +398,18 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
       return returnValue;
     }
     
-    public final void determineNextSynchronizationInterval(Instant now) {
+    private final void determineNextSynchronizationInterval(Instant now) {
       if (now == null) {
         now = Instant.now();
       }
       this.nextSynchronizationInstant = now.plus(this.synchronizationInterval);
     }
     
-    public void setSynchronizationInterval(final Duration synchronizationInterval) {
+    public final void setSynchronizationInterval(final Duration synchronizationInterval) {
       this.synchronizationInterval = synchronizationInterval;
     }
     
-    public Duration getSynchronizationInterval() {
+    public final Duration getSynchronizationInterval() {
       return this.synchronizationInterval;
     }
   }

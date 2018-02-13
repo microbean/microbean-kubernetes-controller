@@ -332,36 +332,38 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * of {@link AbstractEvent.Type#MODIFICATION}.
    */
   @Override
-  public synchronized final void synchronize() {
+  public final void synchronize() {
     final String cn = this.getClass().getName();
     final String mn = "synchronize";
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
-    final Map<?, ? extends T> knownObjects = this.getKnownObjects();
-    if (knownObjects != null) {
-      synchronized (knownObjects) {
-        if (!knownObjects.isEmpty()) {
-          final Collection<? extends T> values = knownObjects.values();
-          if (values != null && !values.isEmpty()) {
-            for (final T knownObject : values) {
-              if (knownObject != null) {
-                // We follow the Go code in that we use *our* key
-                // extraction logic, rather than relying on the known
-                // key in the knownObjects map.
-                final Object key = this.getKey(knownObject);
-                if (key != null) {
-                  final EventQueue<T> eventQueue = this.map.get(key);
-                  if (eventQueue == null || eventQueue.isEmpty()) {
-                    // We make a SynchronizationEvent of type
-                    // MODIFICATION.  shared_informer.go checks in its
-                    // HandleDeltas function to see if oldObj exists;
-                    // if so, it's a modification.  Here we take
-                    // action *only if* the equivalent of oldObj
-                    // exists, therefore this is a
-                    // SynchronizationEvent of type MODIFICATION, not
-                    // ADDITION.
-                    this.synchronize(this, AbstractEvent.Type.MODIFICATION, knownObject, true /* yes, populate */);
+    synchronized (this) {
+      final Map<?, ? extends T> knownObjects = this.getKnownObjects();
+      if (knownObjects != null) {
+        synchronized (knownObjects) {
+          if (!knownObjects.isEmpty()) {
+            final Collection<? extends T> values = knownObjects.values();
+            if (values != null && !values.isEmpty()) {
+              for (final T knownObject : values) {
+                if (knownObject != null) {
+                  // We follow the Go code in that we use *our* key
+                  // extraction logic, rather than relying on the
+                  // known key in the knownObjects map.
+                  final Object key = this.getKey(knownObject);
+                  if (key != null) {
+                    final EventQueue<T> eventQueue = this.map.get(key);
+                    if (eventQueue == null || eventQueue.isEmpty()) {
+                      // We make a SynchronizationEvent of type
+                      // MODIFICATION.  shared_informer.go checks in
+                      // its HandleDeltas function to see if oldObj
+                      // exists; if so, it's a modification.  Here we
+                      // take action *only if* the equivalent of
+                      // oldObj exists, therefore this is a
+                      // SynchronizationEvent of type MODIFICATION,
+                      // not ADDITION.
+                      this.synchronize(this, AbstractEvent.Type.MODIFICATION, knownObject, true /* yes, populate */);
+                    }
                   }
                 }
               }
@@ -625,10 +627,12 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
   }
 
   /**
-   * Starts a new {@linkplain Thread#isDaemon() daemon} {@link Thread}
-   * that, until {@link #close()} is called, removes {@link
-   * EventQueue}s from this {@link EventQueueCollection} and supplies
-   * them to the supplied {@link Consumer}.
+   * Starts a new {@link Thread} that, until {@link #close()} is
+   * called, removes {@link EventQueue}s from this {@link
+   * EventQueueCollection} and supplies them to the supplied {@link
+   * Consumer}, and returns a {@link Future} representing this task.
+   *
+   * <p>This method may return {@code null}.</p>
    *
    * <p>Invoking this method does not block the calling {@link
    * Thread}.</p>
@@ -636,10 +640,14 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * @param siphon the {@link Consumer} that will process each {@link
    * EventQueue} as it becomes ready; must not be {@code null}
    *
+   * @return a {@link Future} representing the task that is feeding
+   * {@link EventQueue}s to the supplied {@link Consumer}, or {@code
+   * null} if no task was started
+   *
    * @exception NullPointerException if {@code siphon} is {@code null}
    */
   @NonBlocking
-  public final void start(final Consumer<? super EventQueue<? extends T>> siphon) {
+  public final Future<?> start(final Consumer<? super EventQueue<? extends T>> siphon) {
     final String cn = this.getClass().getName();
     final String mn = "start";
     if (this.logger.isLoggable(Level.FINER)) {
@@ -647,19 +655,24 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     }
     
     Objects.requireNonNull(siphon);
+
+    final Future<?> returnValue;
     synchronized (this) {
       if (this.consumerExecutor == null) {
         this.consumerExecutor = this.createScheduledThreadPoolExecutor();
         if (this.consumerExecutor == null) {
           throw new IllegalStateException();
         }
-        this.consumerExecutor.scheduleWithFixedDelay(this.createSingleEventQueueConsumptionTask(siphon), 0L, 0L, TimeUnit.MILLISECONDS);
+        returnValue = this.consumerExecutor.scheduleWithFixedDelay(this.createEventQueueConsumptionTask(siphon), 0L, 1L, TimeUnit.SECONDS);
+      } else {
+        returnValue = null;
       }
     }
     
     if (this.logger.isLoggable(Level.FINER)) {
-      this.logger.exiting(cn, mn);
+      this.logger.exiting(cn, mn, returnValue);
     }
+    return returnValue;
   }
 
   private final ScheduledThreadPoolExecutor createScheduledThreadPoolExecutor() {
@@ -693,11 +706,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     final ExecutorService consumerExecutor;
     synchronized (this) {
       this.closing = true;
-      if (this.consumerExecutor instanceof ExecutorService) {
-        consumerExecutor = (ExecutorService)this.consumerExecutor;
-      } else {
-        consumerExecutor = null;
-      }
+      consumerExecutor = this.consumerExecutor;
     }
 
     if (consumerExecutor != null) {
@@ -720,10 +729,11 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     }
   }
 
-  private final Runnable createSingleEventQueueConsumptionTask(final Consumer<? super EventQueue<? extends T>> siphon) {
+  private final Runnable createEventQueueConsumptionTask(final Consumer<? super EventQueue<? extends T>> siphon) {
     Objects.requireNonNull(siphon);
     final Runnable returnValue = () -> {
-      synchronized (this) {
+      while (!Thread.currentThread().isInterrupted()) {
+        @Blocking
         final EventQueue<T> eventQueue = this.get();
         if (eventQueue != null) {
           synchronized (eventQueue) {
@@ -775,38 +785,41 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
   }
   
   @Blocking
-  private synchronized final EventQueue<T> take() throws InterruptedException {
+  private final EventQueue<T> take() throws InterruptedException {
     final String cn = this.getClass().getName();
     final String mn = "take";
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
 
-    while (this.isEmpty() && !this.closing) {
-      this.wait();
-    }
-    assert this.populated : "this.populated == false";
     final EventQueue<T> returnValue;
-    if (this.isEmpty()) {
-      assert this.closing : "this.isEmpty() && !this.closing";
-      returnValue = null;
-    } else {
-      final Iterator<EventQueue<T>> iterator = this.map.values().iterator();
-      assert iterator != null;
-      assert iterator.hasNext();
-      returnValue = iterator.next();
-      assert returnValue != null;
-      iterator.remove();
-      if (this.initialPopulationCount > 0) {
-        // We know we're not populated and our initialPopulationCount
-        // is not 0, so therefore we are not synchronized.
-        assert !this.isSynchronized();
-        final int oldInitialPopulationCount = this.initialPopulationCount;
-        this.initialPopulationCount--;
-        this.firePropertyChange("initialPopulationCount", oldInitialPopulationCount, this.initialPopulationCount);
-        this.firePropertyChange("synchronized", false, this.isSynchronized());
+    synchronized (this) {
+      while (this.isEmpty() && !this.closing) {
+        this.wait(); // blocks
       }
-      this.firePropertyChange("empty", false, this.isEmpty());
+      assert this.populated : "this.populated == false";
+      if (this.isEmpty()) {
+        assert this.closing : "this.isEmpty() && !this.closing";
+        returnValue = null;
+      } else {
+        final Iterator<EventQueue<T>> iterator = this.map.values().iterator();
+        assert iterator != null;
+        assert iterator.hasNext();
+        returnValue = iterator.next();
+        assert returnValue != null;
+        iterator.remove();
+        if (this.initialPopulationCount > 0) {
+          // We know we're not populated and our
+          // initialPopulationCount is not 0, so therefore we are not
+          // synchronized.
+          assert !this.isSynchronized();
+          final int oldInitialPopulationCount = this.initialPopulationCount;
+          this.initialPopulationCount--;
+          this.firePropertyChange("initialPopulationCount", oldInitialPopulationCount, this.initialPopulationCount);
+          this.firePropertyChange("synchronized", false, this.isSynchronized());
+        }
+        this.firePropertyChange("empty", false, this.isEmpty());
+      }
     }
     
     if (this.logger.isLoggable(Level.FINER)) {
