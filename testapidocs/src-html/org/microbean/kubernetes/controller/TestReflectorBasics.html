@@ -89,7 +89,7 @@
 <span class="sourceLineNo">081</span>    final Consumer&lt;? super EventQueue&lt;? extends ConfigMap&gt;&gt; siphon = (q) -&gt; {<a name="line.81"></a>
 <span class="sourceLineNo">082</span>      assertNotNull(q);<a name="line.82"></a>
 <span class="sourceLineNo">083</span>      assertFalse(q.isEmpty());<a name="line.83"></a>
-<span class="sourceLineNo">084</span>      for (final Event&lt;? extends ConfigMap&gt; event : q) {<a name="line.84"></a>
+<span class="sourceLineNo">084</span>      for (final AbstractEvent&lt;? extends ConfigMap&gt; event : q) {<a name="line.84"></a>
 <span class="sourceLineNo">085</span>        assertNotNull(event);<a name="line.85"></a>
 <span class="sourceLineNo">086</span>        System.out.println("*** received event: " + event);<a name="line.86"></a>
 <span class="sourceLineNo">087</span>        final Event.Type type = event.getType();<a name="line.87"></a>
