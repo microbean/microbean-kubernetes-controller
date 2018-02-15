@@ -315,6 +315,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       this.logger.entering(cn, mn);
     }
     try {
+      this.closeSynchronizationExecutorService();
       final ScheduledFuture<?> synchronizationTask = this.synchronizationTask;
       if (synchronizationTask != null) {
         synchronizationTask.cancel(false);
@@ -497,14 +498,11 @@ public class Reflector<T extends HasMetadata> implements Closeable {
 
       // Now that we've taken care of our list() operation, set up our
       // watch() operation.
-      try {
-        @SuppressWarnings("unchecked")
-        final Closeable temp = ((VersionWatchable<? extends Closeable, Watcher<T>>)operation).withResourceVersion(resourceVersion).watch(new WatchHandler());
-        assert temp != null;
-        this.watch = temp;
-      } finally {
-        this.closeSynchronizationExecutorService();
-      }
+      @SuppressWarnings("unchecked")
+      final Closeable temp = ((VersionWatchable<? extends Closeable, Watcher<T>>)operation).withResourceVersion(resourceVersion).watch(new WatchHandler());
+      assert temp != null;
+      this.watch = temp;
+
     }
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
