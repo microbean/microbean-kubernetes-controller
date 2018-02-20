@@ -172,6 +172,8 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
 
   @GuardedBy("this")
   private ScheduledExecutorService consumerExecutor;
+
+  private volatile Future<?> eventQueueConsumptionTask;
   
   /**
    * A {@link Logger} used by this {@link EventQueueCollection}.
@@ -663,7 +665,8 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         if (this.consumerExecutor == null) {
           throw new IllegalStateException();
         }
-        returnValue = this.consumerExecutor.scheduleWithFixedDelay(this.createEventQueueConsumptionTask(siphon), 0L, 1L, TimeUnit.SECONDS);
+        this.eventQueueConsumptionTask = this.consumerExecutor.scheduleWithFixedDelay(this.createEventQueueConsumptionTask(siphon), 0L, 1L, TimeUnit.SECONDS);
+        returnValue = this.eventQueueConsumptionTask;
       } else {
         returnValue = null;
       }
@@ -704,19 +707,28 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     }
 
     final ExecutorService consumerExecutor;
+    final Future<?> task;
     synchronized (this) {
       this.closing = true;
+      task = this.eventQueueConsumptionTask;
       consumerExecutor = this.consumerExecutor;
     }
 
     if (consumerExecutor != null) {
+      // Stop accepting new tasks.
       consumerExecutor.shutdown();
+
+      if (task != null) {
+        task.cancel(true);
+      }
+      
+      // Cancel all tasks firmly.
+      consumerExecutor.shutdownNow();
+      
       try {
-        if (!consumerExecutor.awaitTermination(60, TimeUnit.SECONDS)) {
-          consumerExecutor.shutdownNow();
-          if (!consumerExecutor.awaitTermination(60, TimeUnit.SECONDS) && this.logger.isLoggable(Level.WARNING)) {
-            this.logger.logp(Level.WARNING, cn, mn, "consumerExecutor.awaitTermination() failed");
-          }
+        // Wait for termination to complete normally.
+        if (!consumerExecutor.awaitTermination(60, TimeUnit.SECONDS) && this.logger.isLoggable(Level.WARNING)) {
+          this.logger.logp(Level.WARNING, cn, mn, "consumerExecutor.awaitTermination() failed");
         }
       } catch (final InterruptedException interruptedException) {
         consumerExecutor.shutdownNow();

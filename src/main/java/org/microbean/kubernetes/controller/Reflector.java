@@ -110,7 +110,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
 
   private final boolean shutdownSynchronizationExecutorServiceOnClose;
 
-  private final Duration synchronizationInterval;
+  private final long synchronizationIntervalInSeconds;
 
   @GuardedBy("this")
   private Closeable watch;
@@ -184,8 +184,9 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    *
    * @param synchronizationInterval a {@link Duration} representing
    * the time in between one {@linkplain EventCache#synchronize()
-   * synchronization operation} and another; may be {@code null} in
-   * which case no synchronization will occur
+   * synchronization operation} and another; interpreted with a
+   * granularity of seconds; may be {@code null} or semantically equal
+   * to {@code 0} seconds in which case no synchronization will occur
    *
    * @exception NullPointerException if {@code operation} or {@code
    * eventCache} is {@code null}
@@ -259,15 +260,17 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     this.eventCache = Objects.requireNonNull(eventCache);
     // TODO: research: maybe: operation.withField("metadata.resourceVersion", "0")?    
     this.operation = operation.withResourceVersion("0");
-    this.synchronizationInterval = synchronizationInterval;
-    if (synchronizationExecutorService == null) {
-      if (synchronizationInterval == null) {
-        this.synchronizationExecutorService = null;
-        this.shutdownSynchronizationExecutorServiceOnClose = false;
-      } else {
-        this.synchronizationExecutorService = Executors.newScheduledThreadPool(1);
-        this.shutdownSynchronizationExecutorServiceOnClose = true;
-      }
+    if (synchronizationInterval == null) {
+      this.synchronizationIntervalInSeconds = 0L;
+    } else {
+      this.synchronizationIntervalInSeconds = synchronizationInterval.get(ChronoUnit.SECONDS);
+    }
+    if (this.synchronizationIntervalInSeconds <= 0L) {
+      this.synchronizationExecutorService = null;
+      this.shutdownSynchronizationExecutorServiceOnClose = false;
+    } else if (synchronizationExecutorService == null) {
+      this.synchronizationExecutorService = Executors.newScheduledThreadPool(1);
+      this.shutdownSynchronizationExecutorServiceOnClose = true;
     } else {
       this.synchronizationExecutorService = synchronizationExecutorService;
       this.shutdownSynchronizationExecutorServiceOnClose = false;
@@ -316,11 +319,6 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     }
     try {
       this.closeSynchronizationExecutorService();
-      final ScheduledFuture<?> synchronizationTask = this.synchronizationTask;
-      if (synchronizationTask != null) {
-        synchronizationTask.cancel(false);
-      }
-      this.closeSynchronizationExecutorService();
       if (this.watch != null) {
         this.watch.close();
       }
@@ -339,12 +337,22 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       this.logger.entering(cn, mn);
     }
     if (this.synchronizationExecutorService != null && this.shutdownSynchronizationExecutorServiceOnClose) {
+
+      // Stop accepting new tasks.  Not that any will be showing up
+      // anyway, but it's the right thing to do.
       this.synchronizationExecutorService.shutdown();
+
+      // Nicely cancel our task.
+      final ScheduledFuture<?> synchronizationTask = this.synchronizationTask;
+      if (synchronizationTask != null) {
+        synchronizationTask.cancel(true /* interrupt the task */);
+      }
+
       try {
         if (!this.synchronizationExecutorService.awaitTermination(60L, TimeUnit.SECONDS)) {
           this.synchronizationExecutorService.shutdownNow();
           if (!this.synchronizationExecutorService.awaitTermination(60L, TimeUnit.SECONDS)) {
-            this.synchronizationExecutorService.shutdownNow();
+            // TODO: log
           }
         }
       } catch (final InterruptedException interruptedException) {
@@ -363,35 +371,27 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
-    if (this.synchronizationExecutorService != null) {
+
+    if (this.synchronizationExecutorService != null && this.synchronizationTask == null) {
+      assert this.synchronizationIntervalInSeconds > 0L;
       
-      final Duration synchronizationDuration = this.getSynchronizationInterval();
-      final long seconds;
-      if (synchronizationDuration == null) {
-        seconds = 0L;
-      } else {
-        seconds = synchronizationDuration.get(ChronoUnit.SECONDS);
+      if (this.logger.isLoggable(Level.INFO)) {
+        this.logger.logp(Level.INFO, cn, mn, "Scheduling downstream synchronization every {0} seconds", Long.valueOf(this.synchronizationIntervalInSeconds));
       }
-        
-      if (seconds > 0L) {
-        if (this.logger.isLoggable(Level.INFO)) {
-          this.logger.logp(Level.INFO, cn, mn, "Scheduling downstream synchronization every {0} seconds", Long.valueOf(seconds));
-        }
-        final ScheduledFuture<?> job = this.synchronizationExecutorService.scheduleWithFixedDelay(() -> {
-            if (shouldSynchronize()) {
-              if (logger.isLoggable(Level.FINE)) {
-                logger.logp(Level.FINE, cn, mn, "Synchronizing event cache with its downstream consumers");
-              }
-              synchronized (eventCache) {
-                eventCache.synchronize();
-              }
+      final ScheduledFuture<?> job = this.synchronizationExecutorService.scheduleWithFixedDelay(() -> {
+          if (shouldSynchronize()) {
+            if (logger.isLoggable(Level.FINE)) {
+              logger.logp(Level.FINE, cn, mn, "Synchronizing event cache with its downstream consumers");
             }
-          }, 0L, seconds, TimeUnit.SECONDS);
-        assert job != null;
-        this.synchronizationTask = job;
-      }
-      
+            synchronized (eventCache) {
+              eventCache.synchronize();
+            }
+          }
+        }, 0L, this.synchronizationIntervalInSeconds, TimeUnit.SECONDS);
+      assert job != null;
+      this.synchronizationTask = job;
     }
+
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
     }
@@ -430,10 +430,6 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     return returnValue;
   }
   
-  private final Duration getSynchronizationInterval() {
-    return this.synchronizationInterval;
-  }
-
   private final Object getLastSynchronizationResourceVersion() {
     return this.lastSynchronizationResourceVersion;
   }
@@ -457,53 +453,58 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * @see #close()
    */
   @NonBlocking
-  public synchronized final void start() {
+  public final void start() {
     final String cn = this.getClass().getName();
     final String mn = "start";
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
-    if (this.watch == null) {
 
-      // Run a list operation, and get the resourceVersion of that list.
-      @SuppressWarnings("unchecked")
-      final KubernetesResourceList<? extends T> list = ((Listable<? extends KubernetesResourceList<? extends T>>)this.operation).list();
-      assert list != null;
-      final ListMeta metadata = list.getMetadata();
-      assert metadata != null;      
-      final String resourceVersion = metadata.getResourceVersion();
-      assert resourceVersion != null;
+    synchronized (this) {
+      if (this.watch == null) {
+        
+        // Run a list operation, and get the resourceVersion of that list.
+        @SuppressWarnings("unchecked")
+        final KubernetesResourceList<? extends T> list = ((Listable<? extends KubernetesResourceList<? extends T>>)this.operation).list();
+        assert list != null;
 
-      // Using the results of that list operation, do a full replace
-      // on the EventCache with them.
-      final Collection<? extends T> replacementItems;
-      final Collection<? extends T> items = list.getItems();
-      if (items == null || items.isEmpty()) {
-        replacementItems = Collections.emptySet();
-      } else {
-        replacementItems = Collections.unmodifiableCollection(new ArrayList<>(items));
+        final ListMeta metadata = list.getMetadata();
+        assert metadata != null;
+        final String resourceVersion = metadata.getResourceVersion();
+        assert resourceVersion != null;
+        
+        // Using the results of that list operation, do a full replace
+        // on the EventCache with them.
+        final Collection<? extends T> replacementItems;
+        final Collection<? extends T> items = list.getItems();
+        if (items == null || items.isEmpty()) {
+          replacementItems = Collections.emptySet();
+        } else {
+          replacementItems = Collections.unmodifiableCollection(new ArrayList<>(items));
+        }
+        synchronized (eventCache) {
+          this.eventCache.replace(replacementItems, resourceVersion);
+        }
+        
+        // Record the resource version we captured during our list
+        // operation.
+        this.setLastSynchronizationResourceVersion(resourceVersion);
+        
+        // Now that we've vetted that our list operation works (i.e. no
+        // syntax errors, no connectivity problems) we can schedule
+        // resynchronizations if necessary.
+        this.setUpSynchronization();
+        
+        // Now that we've taken care of our list() operation, set up our
+        // watch() operation.
+        @SuppressWarnings("unchecked")
+        final Closeable temp = ((VersionWatchable<? extends Closeable, Watcher<T>>)operation).withResourceVersion(resourceVersion).watch(new WatchHandler());
+        assert temp != null;
+        this.watch = temp;
+        
       }
-      synchronized (eventCache) {
-        this.eventCache.replace(replacementItems, resourceVersion);
-      }
-
-      // Record the resource version we captured during our list
-      // operation.
-      this.setLastSynchronizationResourceVersion(resourceVersion);
-
-      // Now that we've vetted that our list operation works (i.e. no
-      // syntax errors, no connectivity problems) we can schedule
-      // resynchronizations if necessary.
-      this.setUpSynchronization();
-
-      // Now that we've taken care of our list() operation, set up our
-      // watch() operation.
-      @SuppressWarnings("unchecked")
-      final Closeable temp = ((VersionWatchable<? extends Closeable, Watcher<T>>)operation).withResourceVersion(resourceVersion).watch(new WatchHandler());
-      assert temp != null;
-      this.watch = temp;
-
     }
+    
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
     }

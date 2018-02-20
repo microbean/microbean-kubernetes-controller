@@ -324,6 +324,13 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
         throw new IllegalStateException("createScheduledThreadPoolExecutor() == null");
       }
       this.queue = new LinkedBlockingQueue<>();
+
+      // Schedule a hopefully never-ending task to pump events from
+      // our queue to the supplied eventConsumer.  We schedule this
+      // instead of simply executing it so that if for any reason it
+      // exits it will get restarted.  Cancelling a scheduled task
+      // will also cancel all resubmissions of it, so this is the most
+      // robust thing to do.  The delay of one second is arbitrary.
       this.task = this.executor.scheduleWithFixedDelay(() -> {
           try {
             while (!Thread.currentThread().isInterrupted()) {
@@ -333,6 +340,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
             Thread.currentThread().interrupt();
           }
         }, 0L, 1L, TimeUnit.SECONDS);
+      
       this.setSynchronizationInterval(synchronizationInterval);
     }
 
@@ -395,7 +403,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
       if (now == null) {
         now = Instant.now();
       }
-      final Duration interval = this.synchronizationInterval;
+      final Duration interval = this.getSynchronizationInterval();
       final boolean returnValue = interval != null && !interval.isZero() && now.compareTo(this.nextSynchronizationInstant) >= 0;
       return returnValue;
     }
