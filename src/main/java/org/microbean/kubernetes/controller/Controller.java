@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 
 import java.util.function.Consumer;
@@ -397,11 +398,28 @@ public class Controller<T extends HasMetadata> implements Closeable {
     if (this.logger.isLoggable(Level.INFO)) {
       this.logger.logp(Level.INFO, cn, mn, "Starting {0}", this.siphon);
     }
-    this.eventCache.start(this.siphon);
+    final Future<?> siphonTask = this.eventCache.start(this.siphon);
+    assert siphonTask != null;
     if (this.logger.isLoggable(Level.INFO)) {
       this.logger.logp(Level.INFO, cn, mn, "Starting {0}", this.reflector);
     }
-    this.reflector.start();
+    try {
+      this.reflector.start();
+    } catch (final RuntimeException runtimeException) {
+      try {        
+        this.reflector.close();
+      } catch (final IOException suppressMe) {
+        runtimeException.addSuppressed(suppressMe);
+      }
+      siphonTask.cancel(true);
+      assert siphonTask.isDone();
+      try {
+        this.eventCache.close();
+      } catch (final RuntimeException suppressMe) {
+        runtimeException.addSuppressed(suppressMe);
+      }
+      throw runtimeException;
+    }
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
     }
