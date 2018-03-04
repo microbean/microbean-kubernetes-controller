@@ -164,8 +164,8 @@
                 <location>${project.basedir}/src/main/javadoc/io.fabric8/kubernetes-client/3.1.8</location>
               </offlineLink>
               <offlineLink>
-                <url>http://static.javadoc.io/io.fabric8/kubernetes-model/2.0.4</url>
-                <location>${project.basedir}/src/main/javadoc/io.fabric8/kubernetes-model/2.0.4</location>
+                <url>http://static.javadoc.io/io.fabric8/kubernetes-model/2.0.8</url>
+                <location>${project.basedir}/src/main/javadoc/io.fabric8/kubernetes-model/2.0.8</location>
               </offlineLink>
             </offlineLinks>
           </configuration>
