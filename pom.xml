@@ -35,7 +35,7 @@
       <dependency>
         <groupId>io.fabric8</groupId>
         <artifactId>kubernetes-client</artifactId>
-        <version>3.1.8</version>
+        <version>3.1.10</version>
         <type>jar</type>
         <exclusions>
           <exclusion>
@@ -48,7 +48,7 @@
       <dependency>
         <groupId>io.fabric8</groupId>
         <artifactId>kubernetes-model</artifactId>
-        <version>2.0.8</version>
+        <version>2.0.9</version>
         <type>jar</type>
         <exclusions>
           <exclusion>
@@ -160,12 +160,12 @@
           <configuration>
             <offlineLinks>
               <offlineLink>
-                <url>http://static.javadoc.io/io.fabric8/kubernetes-client/3.1.8</url>
-                <location>${project.basedir}/src/main/javadoc/io.fabric8/kubernetes-client/3.1.8</location>
+                <url>http://static.javadoc.io/io.fabric8/kubernetes-client/3.1.10</url>
+                <location>${project.basedir}/src/main/javadoc/io.fabric8/kubernetes-client/3.1.10</location>
               </offlineLink>
               <offlineLink>
-                <url>http://static.javadoc.io/io.fabric8/kubernetes-model/2.0.8</url>
-                <location>${project.basedir}/src/main/javadoc/io.fabric8/kubernetes-model/2.0.8</location>
+                <url>http://static.javadoc.io/io.fabric8/kubernetes-model/2.0.9</url>
+                <location>${project.basedir}/src/main/javadoc/io.fabric8/kubernetes-model/2.0.9</location>
               </offlineLink>
             </offlineLinks>
           </configuration>
