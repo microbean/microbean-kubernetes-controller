@@ -35,7 +35,7 @@
       <dependency>
         <groupId>io.fabric8</groupId>
         <artifactId>kubernetes-client</artifactId>
-        <version>3.1.10</version>
+        <version>3.2.0</version>
         <type>jar</type>
         <exclusions>
           <exclusion>
@@ -48,7 +48,7 @@
       <dependency>
         <groupId>io.fabric8</groupId>
         <artifactId>kubernetes-model</artifactId>
-        <version>2.0.9</version>
+        <version>2.1.1</version>
         <type>jar</type>
         <exclusions>
           <exclusion>
@@ -158,16 +158,9 @@
         <plugin>
           <artifactId>maven-javadoc-plugin</artifactId>
           <configuration>
-            <offlineLinks>
-              <offlineLink>
-                <url>http://static.javadoc.io/io.fabric8/kubernetes-client/3.1.10</url>
-                <location>${project.basedir}/src/main/javadoc/io.fabric8/kubernetes-client/3.1.10</location>
-              </offlineLink>
-              <offlineLink>
-                <url>http://static.javadoc.io/io.fabric8/kubernetes-model/2.0.9</url>
-                <location>${project.basedir}/src/main/javadoc/io.fabric8/kubernetes-model/2.0.9</location>
-              </offlineLink>
-            </offlineLinks>
+            <additionalJOptions combine.children="append">
+              <additionalJOption>-J-Dhttp.agent=maven-javadoc-plugin</additionalJOption>
+            </additionalJOptions>
           </configuration>
         </plugin>
         
@@ -214,8 +207,9 @@
     <findbugs.threshold>Medium</findbugs.threshold>
 
     <!-- maven-javadoc-plugin properties; see https://maven.apache.org/plugins/maven-javadoc-plugin/javadoc-mojo.html -->
-    <doctitle>&lt;a href="${project.url}" target="_parent"&gt;${project.artifactId}&lt;/a&gt; ${project.version} &lt;a href="https://travis-ci.org/microbean/${project.artifactId}" target="_parent"&gt;&lt;img src="https://travis-ci.org/microbean/${project.artifactId}.svg?branch=master"&gt;&lt;/a&gt;</doctitle>
-    <links>https://microbean.github.io/microbean-kubernetes/apidocs/,https://microbean.github.io/microbean-development-annotations/apidocs/,http://jcip.net/annotations/doc/</links>
+    <doctitle>&lt;a href="${project.url}" target="_parent"&gt;&lt;span style="font-family:Lobster, cursive;"&gt;µb&lt;/span&gt; ${project.artifactId}&lt;/a&gt; ${project.version} &lt;a href="https://travis-ci.org/microbean/${project.artifactId}" target="_parent"&gt;&lt;img src="https://travis-ci.org/microbean/${project.artifactId}.svg?branch=master"&gt;&lt;/a&gt;</doctitle>
+    <links>https://microbean.github.io/microbean-kubernetes/apidocs/,https://microbean.github.io/microbean-development-annotations/apidocs/,http://jcip.net/annotations/doc/,http://static.javadoc.io/io.fabric8/kubernetes-client/3.2.0,http://static.javadoc.io/io.fabric8/kubernetes-model/2.1.1</links>
+    <stylesheetfile>css/stylesheet.css</stylesheetfile>
     
     <!-- maven-release-plugin properties; see http://maven.apache.org/maven-release/maven-release-plugin/perform-mojo.html -->
     <goals>deploy,site-deploy</goals>

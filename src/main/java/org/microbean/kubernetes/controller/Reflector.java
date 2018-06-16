@@ -19,6 +19,9 @@ package org.microbean.kubernetes.controller;
 import java.io.Closeable;
 import java.io.IOException;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+
 import java.time.Duration;
 
 import java.time.temporal.ChronoUnit;
@@ -41,8 +44,15 @@ import io.fabric8.kubernetes.client.DefaultKubernetesClient; // for javadoc only
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watcher;
 
+import io.fabric8.kubernetes.client.dsl.base.BaseOperation;
+import io.fabric8.kubernetes.client.dsl.base.OperationSupport;
+
 import io.fabric8.kubernetes.client.dsl.Listable;
+import io.fabric8.kubernetes.client.dsl.Versionable;
 import io.fabric8.kubernetes.client.dsl.VersionWatchable;
+import io.fabric8.kubernetes.client.dsl.Watchable;
+
+import io.fabric8.kubernetes.client.dsl.internal.CustomResourceOperationsImpl;
 
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
@@ -52,6 +62,9 @@ import io.fabric8.kubernetes.api.model.ListMeta;
 import net.jcip.annotations.GuardedBy;
 import net.jcip.annotations.ThreadSafe;
 
+import okhttp3.OkHttpClient;
+
+import org.microbean.development.annotation.Issue;
 import org.microbean.development.annotation.NonBlocking;
 
 /**
@@ -259,7 +272,8 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     Objects.requireNonNull(operation);
     this.eventCache = Objects.requireNonNull(eventCache);
     // TODO: research: maybe: operation.withField("metadata.resourceVersion", "0")?    
-    this.operation = operation.withResourceVersion("0");
+    this.operation = withResourceVersion(operation, "0");
+    
     if (synchronizationInterval == null) {
       this.synchronizationIntervalInSeconds = 0L;
     } else {
@@ -497,10 +511,10 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         
         // Now that we've taken care of our list() operation, set up our
         // watch() operation.
+
         @SuppressWarnings("unchecked")
-        final Closeable temp = ((VersionWatchable<? extends Closeable, Watcher<T>>)operation).withResourceVersion(resourceVersion).watch(new WatchHandler());
-        assert temp != null;
-        this.watch = temp;
+        final Versionable<? extends Watchable<? extends Closeable, Watcher<T>>> versionableOperation = (Versionable<? extends Watchable<? extends Closeable, Watcher<T>>>)this.operation;
+        this.watch = withResourceVersion(versionableOperation, resourceVersion).watch(new WatchHandler());
         
       }
     }
@@ -517,6 +531,179 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    */
   protected synchronized void onClose() {
 
+  }
+
+
+  /*
+   * Hacks.
+   */
+  
+
+  @Issue(
+    id = "kubernetes-client/1099",
+    uri = "https://github.com/fabric8io/kubernetes-client/issues/1099"
+  )
+  @SuppressWarnings({"rawtypes", "unchecked"})
+  private final Watchable<? extends Closeable, Watcher<T>> withResourceVersion(final Versionable<? extends Watchable<? extends Closeable, Watcher<T>>> operation, final String resourceVersion) {
+    Objects.requireNonNull(operation);
+    Objects.requireNonNull(resourceVersion);
+    Watchable<? extends Closeable, Watcher<T>> returnValue = null;
+    if (operation instanceof CustomResourceOperationsImpl) {
+      final CustomResourceOperationsImpl old = (CustomResourceOperationsImpl)operation;
+      try {
+        returnValue =
+          new CustomResourceOperationsImpl(getClient(old),
+                                           old.getConfig(),
+                                           getApiGroup(old),
+                                           old.getAPIVersion(),
+                                           getResourceT(old),
+                                           old.getNamespace(),
+                                           old.getName(),
+                                           old.isCascading(),
+                                           (T)old.getItem(),
+                                           resourceVersion,
+                                           old.isReloadingFromServer(),
+                                           old.getType(),
+                                           old.getListType(),
+                                           old.getDoneableType());
+      } catch (final ReflectiveOperationException reflectiveOperationException) {
+        throw new KubernetesClientException(reflectiveOperationException.getMessage(), reflectiveOperationException);
+      }
+    } else {
+      returnValue = operation.withResourceVersion("0");
+    }
+    assert returnValue != null;
+    return returnValue;
+  }
+  
+  private static final OkHttpClient getClient(final OperationSupport operation) throws ReflectiveOperationException {
+    Objects.requireNonNull(operation);
+    final Field clientField = OperationSupport.class.getDeclaredField("client");
+    assert !clientField.isAccessible();
+    assert OkHttpClient.class.equals(clientField.getType());
+    OkHttpClient returnValue = null;
+    try {
+      clientField.setAccessible(true);
+      returnValue = (OkHttpClient)clientField.get(operation);
+    } finally {
+      clientField.setAccessible(false);
+    }
+    return returnValue;
+  }
+  
+  private static final String getApiGroup(final OperationSupport operation) throws ReflectiveOperationException {
+    Objects.requireNonNull(operation);
+    final Field apiGroupField = OperationSupport.class.getDeclaredField("apiGroup");
+    assert !apiGroupField.isAccessible();
+    assert String.class.equals(apiGroupField.getType());
+    String returnValue = null;
+    try {
+      apiGroupField.setAccessible(true);
+      returnValue = (String)apiGroupField.get(operation);
+    } finally {
+      apiGroupField.setAccessible(false);
+    }
+    return returnValue;
+  }
+
+  private static final String getResourceT(final OperationSupport operation) throws ReflectiveOperationException {
+    Objects.requireNonNull(operation);
+    final Field resourceTField = OperationSupport.class.getDeclaredField("resourceT");
+    assert !resourceTField.isAccessible();
+    assert String.class.equals(resourceTField.getType());
+    String returnValue = null;
+    try {
+      resourceTField.setAccessible(true);
+      returnValue = (String)resourceTField.get(operation);
+    } finally {
+      resourceTField.setAccessible(false);
+    }
+    return returnValue;
+  }
+  
+  private static final Map<String, String> getFields(final BaseOperation<?, ?, ?, ?> operation) throws ReflectiveOperationException {
+    Objects.requireNonNull(operation);
+    final Method getFieldsMethod = BaseOperation.class.getDeclaredMethod("getFields");
+    assert !getFieldsMethod.isAccessible();
+    assert Map.class.equals(getFieldsMethod.getReturnType());
+    Map<String, String> returnValue = null;
+    try {
+      getFieldsMethod.setAccessible(true);
+      @SuppressWarnings("unchecked")
+      final Map<String, String> temp = (Map<String, String>)getFieldsMethod.invoke(operation);
+      returnValue = temp;
+    } finally {
+      getFieldsMethod.setAccessible(false);
+    }
+    return returnValue;
+  }
+  
+  private static final Map<String, String> getLabels(final BaseOperation<?, ?, ?, ?> operation) throws ReflectiveOperationException {
+    Objects.requireNonNull(operation);
+    final Method getLabelsMethod = BaseOperation.class.getDeclaredMethod("getLabels");
+    assert !getLabelsMethod.isAccessible();
+    assert Map.class.equals(getLabelsMethod.getReturnType());
+    Map<String, String> returnValue = null;
+    try {
+      getLabelsMethod.setAccessible(true);
+      @SuppressWarnings("unchecked")
+      final Map<String, String> temp = (Map<String, String>)getLabelsMethod.invoke(operation);
+      returnValue = temp;
+    } finally {
+      getLabelsMethod.setAccessible(false);
+    }
+    return returnValue;
+  }
+
+  private static final Map<String, String[]> getLabelsIn(final BaseOperation<?, ?, ?, ?> operation) throws ReflectiveOperationException {
+    Objects.requireNonNull(operation);
+    final Method getLabelsInMethod = BaseOperation.class.getDeclaredMethod("getLabelsIn");
+    assert !getLabelsInMethod.isAccessible();
+    assert Map.class.equals(getLabelsInMethod.getReturnType());
+    Map<String, String[]> returnValue = null;
+    try {
+      getLabelsInMethod.setAccessible(true);
+      @SuppressWarnings("unchecked")
+      final Map<String, String[]> temp = (Map<String, String[]>)getLabelsInMethod.invoke(operation);
+      returnValue = temp;
+    } finally {
+      getLabelsInMethod.setAccessible(false);
+    }
+    return returnValue;
+  }
+
+  private static final Map<String, String> getLabelsNot(final BaseOperation<?, ?, ?, ?> operation) throws ReflectiveOperationException {
+    Objects.requireNonNull(operation);
+    final Method getLabelsNotMethod = BaseOperation.class.getDeclaredMethod("getLabelsNot");
+    assert !getLabelsNotMethod.isAccessible();
+    assert Map.class.equals(getLabelsNotMethod.getReturnType());
+    Map<String, String> returnValue = null;
+    try {
+      getLabelsNotMethod.setAccessible(true);
+      @SuppressWarnings("unchecked")
+      final Map<String, String> temp = (Map<String, String>)getLabelsNotMethod.invoke(operation);
+      returnValue = temp;
+    } finally {
+      getLabelsNotMethod.setAccessible(false);
+    }
+    return returnValue;
+  }
+  
+  private static final Map<String, String[]> getLabelsNotIn(final BaseOperation<?, ?, ?, ?> operation) throws ReflectiveOperationException {
+    Objects.requireNonNull(operation);
+    final Method getLabelsNotInMethod = BaseOperation.class.getDeclaredMethod("getLabelsNotIn");
+    assert !getLabelsNotInMethod.isAccessible();
+    assert Map.class.equals(getLabelsNotInMethod.getReturnType());
+    Map<String, String[]> returnValue = null;
+    try {
+      getLabelsNotInMethod.setAccessible(true);
+      @SuppressWarnings("unchecked")
+      final Map<String, String[]> temp = (Map<String, String[]>)getLabelsNotInMethod.invoke(operation);
+      returnValue = temp;
+    } finally {
+      getLabelsNotInMethod.setAccessible(false);
+    }
+    return returnValue;
   }
   
 
