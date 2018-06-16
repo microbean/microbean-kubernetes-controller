@@ -33,6 +33,41 @@
     <dependencies>
 
       <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-annotations</artifactId>
+        <version>2.9.6</version>
+        <type>jar</type>
+      </dependency>
+
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-core</artifactId>
+        <version>2.9.6</version>
+        <type>jar</type>
+      </dependency>
+      
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>2.9.6</version>
+        <type>jar</type>
+      </dependency>
+
+      <dependency>
+        <groupId>com.fasterxml.jackson.dataformat</groupId>
+        <artifactId>jackson-dataformat-yaml</artifactId>
+        <version>2.9.6</version>
+        <type>jar</type>
+      </dependency>
+      
+      <dependency>
+        <groupId>com.fasterxml.jackson.module</groupId>
+        <artifactId>jackson-module-jaxb-annotations</artifactId>
+        <version>2.9.6</version>
+        <type>jar</type>
+      </dependency>
+      
+      <dependency>
         <groupId>io.fabric8</groupId>
         <artifactId>kubernetes-client</artifactId>
         <version>3.2.0</version>
@@ -76,6 +111,13 @@
         <groupId>org.slf4j</groupId>
         <artifactId>slf4j-simple</artifactId>
         <version>1.7.25</version>
+        <type>jar</type>
+      </dependency>
+
+      <dependency>
+        <groupId>org.yaml</groupId>
+        <artifactId>snakeyaml</artifactId>
+        <version>1.21</version>
         <type>jar</type>
       </dependency>
       
@@ -174,6 +216,12 @@
           <artifactId>findbugs-maven-plugin</artifactId>
           <version>3.0.4</version>
         </plugin>
+
+        <plugin>
+          <groupId>org.owasp</groupId>
+          <artifactId>dependency-check-maven</artifactId>
+          <version>3.2.1</version>                    
+        </plugin>
         
       </plugins>
     </pluginManagement>
@@ -201,6 +249,12 @@
 
   <properties>
 
+    <!-- maven-project-info-reports-plugin properties; see https://maven.apache.org/plugins/maven-project-info-reports-plugin/ -->
+    <dependency.locations.enabled>false</dependency.locations.enabled>
+    
+    <!-- dependency-check-plugin properties; see -->
+    <suppressionFile>${basedir}/src/dependency-check/suppressions.xml</suppressionFile>
+    
     <!-- findbugs-maven-plugin properties; see http://gleclaire.github.io/findbugs-maven-plugin/findbugs-mojo.html -->
     <findbugs.effort>Max</findbugs.effort>
     <findbugs.excludeFilterFile>src/findbugs/exclude.xml</findbugs.excludeFilterFile>
@@ -232,6 +286,10 @@
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>findbugs-maven-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.owasp</groupId>
+        <artifactId>dependency-check-maven</artifactId>
       </plugin>
     </plugins>
   </reporting>
