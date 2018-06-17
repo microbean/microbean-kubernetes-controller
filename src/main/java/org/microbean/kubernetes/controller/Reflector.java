@@ -570,7 +570,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         throw new KubernetesClientException(reflectiveOperationException.getMessage(), reflectiveOperationException);
       }
     } else {
-      returnValue = operation.withResourceVersion("0");
+      returnValue = operation.withResourceVersion(resourceVersion);
     }
     assert returnValue != null;
     return returnValue;
