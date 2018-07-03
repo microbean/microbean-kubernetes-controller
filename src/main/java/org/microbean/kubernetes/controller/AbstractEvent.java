@@ -18,15 +18,10 @@ package org.microbean.kubernetes.controller;
 
 import java.io.Serializable; // for javadoc only
 
-import java.time.Duration;
-import java.time.Instant;
-
-import java.util.EventListener;
 import java.util.EventObject;
 import java.util.Objects;
 
 import io.fabric8.kubernetes.api.model.HasMetadata;
-import io.fabric8.kubernetes.api.model.ObjectMeta;
 
 /**
  * An {@code abstract} {@link EventObject} that represents another

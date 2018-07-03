@@ -106,17 +106,35 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
    * {@link EventDistributor} and whatever mechanism (such as a {@link
    * Controller}) is feeding it; may be {@code null}
    *
+   * @see #EventDistributor(Map, Duration)
+   */
+  public EventDistributor(final Map<Object, T> knownObjects) {
+    this(knownObjects, null);
+  }
+
+  /**
+   * Creates a new {@link EventDistributor}.
+   *
+   * @param knownObjects a mutable {@link Map} of Kubernetes resources
+   * that contains or will contain Kubernetes resources known to this
+   * {@link EventDistributor} and whatever mechanism (such as a {@link
+   * Controller}) is feeding it; may be {@code null}
+   *
+   * @param synchronizationInterval a {@link Duration} representing
+   * the interval after which an attempt to synchronize might happen;
+   * may be {@code null} in which case no synchronization will occur
+   *
    * @see
    * ResourceTrackingEventQueueConsumer#ResourceTrackingEventQueueConsumer(Map)
    */
-  public EventDistributor(final Map<Object, T> knownObjects) {
+  public EventDistributor(final Map<Object, T> knownObjects, final Duration synchronizationInterval) {
     super(knownObjects);
     final ReadWriteLock lock = new ReentrantReadWriteLock();
     this.readLock = lock.readLock();
     this.writeLock = lock.writeLock();
     this.distributors = new ArrayList<>();    
     this.synchronizingDistributors = new ArrayList<>();
-    this.synchronizationInterval = null; // TODO: implement/fix
+    this.synchronizationInterval = synchronizationInterval;
   }
 
 
@@ -400,19 +418,31 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     
     
     private final boolean shouldSynchronize(Instant now) {
-      if (now == null) {
-        now = Instant.now();
-      }
       final Duration interval = this.getSynchronizationInterval();
-      final boolean returnValue = interval != null && !interval.isZero() && now.compareTo(this.nextSynchronizationInstant) >= 0;
+      final boolean returnValue;
+      if (interval == null || interval.isZero()) {
+        returnValue = false;
+      } else if (now == null) {
+        returnValue = Instant.now().compareTo(this.nextSynchronizationInstant) >= 0;
+      } else {
+        returnValue = now.compareTo(this.nextSynchronizationInstant) >= 0;
+      }
       return returnValue;
     }
     
     private final void determineNextSynchronizationInterval(Instant now) {
-      if (now == null) {
-        now = Instant.now();
+      final Duration synchronizationInterval = this.getSynchronizationInterval();
+      if (synchronizationInterval == null) {
+        if (now == null) {
+          this.nextSynchronizationInstant = Instant.now();
+        } else {
+          this.nextSynchronizationInstant = now;
+        }
+      } else if (now == null) {
+        this.nextSynchronizationInstant = Instant.now().plus(synchronizationInterval);
+      } else {
+        this.nextSynchronizationInstant = now.plus(synchronizationInterval);
       }
-      this.nextSynchronizationInstant = now.plus(this.synchronizationInterval);
     }
     
     public final void setSynchronizationInterval(final Duration synchronizationInterval) {

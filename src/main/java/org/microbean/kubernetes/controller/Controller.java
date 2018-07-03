@@ -16,9 +16,6 @@
  */
 package org.microbean.kubernetes.controller;
 
-import java.beans.PropertyChangeEvent;
-import java.beans.PropertyChangeListener;
-
 import java.io.Closeable;
 import java.io.IOException;
 

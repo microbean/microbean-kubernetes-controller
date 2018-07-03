@@ -17,14 +17,12 @@
 package org.microbean.kubernetes.controller;
 
 import java.util.AbstractCollection;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.NoSuchElementException; // for javadoc only
 import java.util.Objects;
-import java.util.Queue;
 
 import java.util.function.Consumer;
 
