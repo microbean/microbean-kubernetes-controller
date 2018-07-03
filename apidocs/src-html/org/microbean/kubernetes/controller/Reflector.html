@@ -578,7 +578,7 @@
 <span class="sourceLineNo">570</span>        throw new KubernetesClientException(reflectiveOperationException.getMessage(), reflectiveOperationException);<a name="line.570"></a>
 <span class="sourceLineNo">571</span>      }<a name="line.571"></a>
 <span class="sourceLineNo">572</span>    } else {<a name="line.572"></a>
-<span class="sourceLineNo">573</span>      returnValue = operation.withResourceVersion("0");<a name="line.573"></a>
+<span class="sourceLineNo">573</span>      returnValue = operation.withResourceVersion(resourceVersion);<a name="line.573"></a>
 <span class="sourceLineNo">574</span>    }<a name="line.574"></a>
 <span class="sourceLineNo">575</span>    assert returnValue != null;<a name="line.575"></a>
 <span class="sourceLineNo">576</span>    return returnValue;<a name="line.576"></a>
