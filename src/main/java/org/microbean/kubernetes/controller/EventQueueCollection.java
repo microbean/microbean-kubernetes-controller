@@ -39,6 +39,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import java.util.logging.Level;
@@ -168,6 +169,8 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
   private ScheduledExecutorService consumerExecutor;
 
   private volatile Future<?> eventQueueConsumptionTask;
+
+  private final Function<? super Throwable, Boolean> errorHandler;
   
   /**
    * A {@link Logger} used by this {@link EventQueueCollection}.
@@ -177,7 +180,6 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * @see #createLogger()
    */
   protected final Logger logger;
-
   
   /*
    * Constructors.
@@ -192,7 +194,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * @see #EventQueueCollection(Map, int, float)
    */
   public EventQueueCollection() {
-    this(null, 16, 0.75f);
+    this(null, null, 16, 0.75f);
   }
 
   /**
@@ -209,7 +211,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * @see #EventQueueCollection(Map, int, float)
    */
   public EventQueueCollection(final Map<?, ? extends T> knownObjects) {
-    this(knownObjects, 16, 0.75f);
+    this(knownObjects, null, 16, 0.75f);
   }
 
   /**
@@ -232,9 +234,42 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * {@code 1}
    */
   public EventQueueCollection(final Map<?, ? extends T> knownObjects, final int initialCapacity, final float loadFactor) {
+    this(knownObjects, null, initialCapacity, loadFactor);
+  }
+
+  /**
+   * Creates a new {@link EventQueueCollection}.
+   *
+   * @param knownObjects a {@link Map} containing the last known state
+   * of Kubernetes resources this {@link EventQueueCollection} is
+   * caching events for; may be {@code null} if this {@link
+   * EventQueueCollection} is not interested in tracking deletions of
+   * objects; if non-{@code null} <strong>will be synchronized on by
+   * this class</strong> during retrieval and traversal operations
+   *
+   * @param errorHandler a {@link Function} that accepts a {@link
+   * Throwable} and returns a {@link Boolean} indicating whether the
+   * error was handled or not; used to handle truly unanticipated
+   * errors from within a {@link ScheduledThreadPoolExecutor}; may be
+   * {@code null}
+   *
+   * @param initialCapacity the initial capacity of the internal data
+   * structure used to house this {@link EventQueueCollection}'s
+   * {@link EventQueue}s; must be an integer greater than {@code 0}
+   *
+   * @param loadFactor the load factor of the internal data structure
+   * used to house this {@link EventQueueCollection}'s {@link
+   * EventQueue}s; must be a positive number between {@code 0} and
+   * {@code 1}
+   */
+  public EventQueueCollection(final Map<?, ? extends T> knownObjects,
+                              final Function<? super Throwable, Boolean> errorHandler,
+                              final int initialCapacity,
+                              final float loadFactor) {
     super();
     final String cn = this.getClass().getName();
     final String mn = "<init>";
+
     this.logger = this.createLogger();
     if (logger == null) {
       throw new IllegalStateException();
@@ -250,9 +285,21 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       }
       this.logger.entering(cn, mn, new Object[] { knownObjectsString, Integer.valueOf(initialCapacity), Float.valueOf(loadFactor) });
     }
+
     this.propertyChangeSupport = new PropertyChangeSupport(this);
     this.map = new LinkedHashMap<>(initialCapacity, loadFactor);
     this.knownObjects = knownObjects;
+    if (errorHandler == null) {
+      this.errorHandler = t -> {
+        if (this.logger.isLoggable(Level.SEVERE)) {
+          this.logger.logp(Level.SEVERE, this.getClass().getName(), "<eventQueueConsumptionTask>", t.getMessage(), t);
+        }
+        return true;
+      };
+    } else {
+      this.errorHandler = errorHandler;
+    }
+
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
     }
@@ -742,11 +789,23 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         @Blocking
         final EventQueue<T> eventQueue = this.get();
         if (eventQueue != null) {
+          Throwable unhandledThrowable = null;
           synchronized (eventQueue) {
             try {
               siphon.accept(eventQueue);
             } catch (final TransientException transientException) {              
               this.map.putIfAbsent(eventQueue.getKey(), eventQueue);
+            } catch (final Throwable e) {
+              unhandledThrowable = e;
+            }
+          }
+          if (unhandledThrowable != null && !this.errorHandler.apply(unhandledThrowable)) {
+            if (unhandledThrowable instanceof RuntimeException) {
+              throw (RuntimeException)unhandledThrowable;
+            } else if (unhandledThrowable instanceof Error) {
+              throw (Error)unhandledThrowable;
+            } else {
+              assert !(unhandledThrowable instanceof Exception);
             }
           }
         }

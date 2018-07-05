@@ -193,20 +193,27 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
 
         for (final AbstractEvent<? extends T> event : eventQueue) {
           if (event != null) {
+            
             assert key.equals(event.getKey());            
+
             final Event.Type eventType = event.getType();
             assert eventType != null;            
+
             final T newResource = event.getResource();
+
             if (event.getPriorResource() != null && this.logger.isLoggable(Level.FINE)) {
               this.logger.logp(Level.FINE, cn, mn, "Unexpected state; event has a priorResource: {0}", event.getPriorResource());
             }
+
             final T priorResource;
             final AbstractEvent<? extends T> newEvent;
+
             if (this.knownObjects == null) {
               priorResource = null;
               newEvent = event;
             } else {
               synchronized (this.knownObjects) {
+
                 if (Event.Type.DELETION.equals(eventType)) {
                   priorResource = this.knownObjects.remove(key);
                   newEvent = event;
@@ -231,8 +238,10 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
                     newEvent = this.createEvent(Event.Type.MODIFICATION, priorResource, newResource);
                   }
                 }
+                
               }
             }
+            
             assert newEvent != null;
             assert newEvent instanceof SynchronizationEvent || newEvent instanceof Event;
             this.accept(newEvent);

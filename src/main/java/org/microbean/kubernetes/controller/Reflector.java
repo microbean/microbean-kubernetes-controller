@@ -37,6 +37,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
+import java.util.function.Function;
+
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -118,6 +120,8 @@ public class Reflector<T extends HasMetadata> implements Closeable {
 
   private final ScheduledExecutorService synchronizationExecutorService;
 
+  private final Function<? super Throwable, Boolean> synchronizationErrorHandler;
+
   @GuardedBy("this")
   private ScheduledFuture<?> synchronizationTask;
 
@@ -176,7 +180,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
                                                                                                                               final EventCache<T> eventCache) {
-    this(operation, eventCache, null, null);
+    this(operation, eventCache, null, null, null);
   }
 
   /**
@@ -216,7 +220,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
                                                                                                                               final EventCache<T> eventCache,
                                                                                                                               final Duration synchronizationInterval) {
-    this(operation, eventCache, null, synchronizationInterval);
+    this(operation, eventCache, null, synchronizationInterval, null);
   }
 
   /**
@@ -259,6 +263,15 @@ public class Reflector<T extends HasMetadata> implements Closeable {
                                                                                                                               final EventCache<T> eventCache,
                                                                                                                               final ScheduledExecutorService synchronizationExecutorService,
                                                                                                                               final Duration synchronizationInterval) {
+    this(operation, eventCache, synchronizationExecutorService, synchronizationInterval, null);
+  }
+
+  @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
+  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
+                                                                                                                              final EventCache<T> eventCache,
+                                                                                                                              final ScheduledExecutorService synchronizationExecutorService,
+                                                                                                                              final Duration synchronizationInterval,
+                                                                                                                              final Function<? super Throwable, Boolean> synchronizationErrorHandler) {
     super();
     this.logger = this.createLogger();
     if (this.logger == null) {
@@ -282,12 +295,25 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     if (this.synchronizationIntervalInSeconds <= 0L) {
       this.synchronizationExecutorService = null;
       this.shutdownSynchronizationExecutorServiceOnClose = false;
-    } else if (synchronizationExecutorService == null) {
-      this.synchronizationExecutorService = Executors.newScheduledThreadPool(1);
-      this.shutdownSynchronizationExecutorServiceOnClose = true;
+      this.synchronizationErrorHandler = null;            
     } else {
-      this.synchronizationExecutorService = synchronizationExecutorService;
-      this.shutdownSynchronizationExecutorServiceOnClose = false;
+      if (synchronizationExecutorService == null) {
+        this.synchronizationExecutorService = Executors.newScheduledThreadPool(1);
+        this.shutdownSynchronizationExecutorServiceOnClose = true;
+      } else {
+        this.synchronizationExecutorService = synchronizationExecutorService;
+        this.shutdownSynchronizationExecutorServiceOnClose = false;
+      }
+      if (synchronizationErrorHandler == null) {
+        this.synchronizationErrorHandler = t -> {
+          if (this.logger.isLoggable(Level.SEVERE)) {
+            this.logger.logp(Level.SEVERE, this.getClass().getName(), "<synchronizationTask>", t.getMessage(), t);
+          }
+          return true;
+        };
+      } else {
+        this.synchronizationErrorHandler = synchronizationErrorHandler;
+      }
     }
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
@@ -397,9 +423,23 @@ public class Reflector<T extends HasMetadata> implements Closeable {
             if (logger.isLoggable(Level.FINE)) {
               logger.logp(Level.FINE, cn, mn, "Synchronizing event cache with its downstream consumers");
             }
+            Throwable throwable = null;
             synchronized (eventCache) {
-              eventCache.synchronize();
+              try {
+                eventCache.synchronize(); // only throws RuntimeException (i.e. no Exception, no InterruptedException)
+              } catch (final Throwable e) {
+                throwable = e;
+              }
             }
+            if (throwable != null && !this.synchronizationErrorHandler.apply(throwable)) {
+              if (throwable instanceof RuntimeException) {
+                throw (RuntimeException)throwable;
+              } else if (throwable instanceof Error) {
+                throw (Error)throwable;
+              } else {
+                assert !(throwable instanceof Exception);
+              }
+            }              
           }
         }, 0L, this.synchronizationIntervalInSeconds, TimeUnit.SECONDS);
       assert job != null;

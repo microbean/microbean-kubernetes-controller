@@ -28,6 +28,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -338,6 +339,60 @@ public class Controller<T extends HasMetadata> implements Closeable {
                                                                                                                                final Duration synchronizationInterval,
                                                                                                                                final Map<Object, T> knownObjects,
                                                                                                                                final Consumer<? super EventQueue<? extends T>> siphon) {
+    this(operation, synchronizationExecutorService, synchronizationInterval, null, knownObjects, siphon);
+  }
+
+  /**
+   * Creates a new {@link Controller} but does not {@linkplain
+   * #start() start it}.
+   *
+   * @param <X> a {@link Listable} and {@link VersionWatchable} that
+   * will be used by the embedded {@link Reflector}; must not be
+   * {@code null}
+   *
+   * @param operation a {@link Listable} and a {@link
+   * VersionWatchable} that produces Kubernetes events; must not be
+   * {@code null}
+   *
+   * @param synchronizationExecutorService the {@link
+   * ScheduledExecutorService} that will be passed to the {@link
+   * Reflector} constructor; may be {@code null} in which case a
+   * default {@link ScheduledExecutorService} may be used instead
+   *
+   * @param synchronizationInterval a {@link Duration} representing
+   * the time in between one {@linkplain EventCache#synchronize()
+   * synchronization operation} and another; may be {@code null} in
+   * which case no synchronization will occur
+   *
+   * @param errorHandler a {@link Function} that accepts a {@link
+   * Throwable} and returns a {@link Boolean} indicating whether the
+   * error was handled or not; used to handle truly unanticipated
+   * errors from within a {@link ScheduledExecutorService} used
+   * during {@linkplain EventCache#synchronize() synchronization} and
+   * event consumption activities; may be {@code null}
+   *
+   * @param knownObjects a {@link Map} containing the last known state
+   * of Kubernetes resources the embedded {@link EventQueueCollection}
+   * is caching events for; may be {@code null} if this {@link
+   * Controller} is not interested in tracking deletions of objects;
+   * if non-{@code null} <strong>will be synchronized on by this
+   * class</strong> during retrieval and traversal operations
+   *
+   * @param siphon the {@link Consumer} that will process each {@link
+   * EventQueue} as it becomes ready; must not be {@code null}
+   *
+   * @exception NullPointerException if {@code operation} or {@code
+   * siphon} is {@code null}
+   *
+   * @see #start()
+   */
+  @SuppressWarnings("rawtypes")
+  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Controller(final X operation,
+                                                                                                                               final ScheduledExecutorService synchronizationExecutorService,
+                                                                                                                               final Duration synchronizationInterval,
+                                                                                                                               final Function<? super Throwable, Boolean> errorHandler,
+                                                                                                                               final Map<Object, T> knownObjects,
+                                                                                                                               final Consumer<? super EventQueue<? extends T>> siphon) {
     super();
     this.logger = this.createLogger();
     if (this.logger == null) {
@@ -346,11 +401,11 @@ public class Controller<T extends HasMetadata> implements Closeable {
     final String cn = this.getClass().getName();
     final String mn = "<init>";
     if (this.logger.isLoggable(Level.FINER)) {
-      this.logger.entering(cn, mn, new Object[] { operation, synchronizationExecutorService, synchronizationInterval, knownObjects, siphon });
+      this.logger.entering(cn, mn, new Object[] { operation, synchronizationExecutorService, synchronizationInterval, errorHandler, knownObjects, siphon });
     }
     this.siphon = Objects.requireNonNull(siphon);
-    this.eventCache = new ControllerEventQueueCollection(knownObjects);    
-    this.reflector = new ControllerReflector(operation, synchronizationExecutorService, synchronizationInterval);
+    this.eventCache = new ControllerEventQueueCollection(knownObjects, errorHandler, 16, 0.75f);
+    this.reflector = new ControllerReflector(operation, synchronizationExecutorService, synchronizationInterval, errorHandler);
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
     }
@@ -641,8 +696,11 @@ public class Controller<T extends HasMetadata> implements Closeable {
      */
 
     
-    private ControllerEventQueueCollection(final Map<?, ? extends T> knownObjects) {
-      super(knownObjects);
+    private ControllerEventQueueCollection(final Map<?, ? extends T> knownObjects,
+                                           final Function<? super Throwable, Boolean> errorHandler,
+                                           final int initialCapacity,
+                                           final float loadFactor) {
+      super(knownObjects, errorHandler, initialCapacity, loadFactor);
     }
 
 
@@ -689,8 +747,8 @@ public class Controller<T extends HasMetadata> implements Closeable {
     @SuppressWarnings("rawtypes")
     private <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> ControllerReflector(final X operation,
                                                                                                                                            final ScheduledExecutorService synchronizationExecutorService,
-                                                                                                                                           final Duration synchronizationInterval) {
-      super(operation, Controller.this.eventCache, synchronizationExecutorService, synchronizationInterval);
+                                                                                                                                           final Duration synchronizationInterval, final Function<? super Throwable, Boolean> synchronizationErrorHandler) {
+      super(operation, Controller.this.eventCache, synchronizationExecutorService, synchronizationInterval, synchronizationErrorHandler);
     }
 
 
