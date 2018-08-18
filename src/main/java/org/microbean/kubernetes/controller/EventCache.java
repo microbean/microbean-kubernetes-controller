@@ -96,6 +96,26 @@ public interface EventCache<T extends HasMetadata> {
    * <p>Not all {@link EventCache} implementations need support
    * synchronization.  An implementation of this method that does
    * nothing is explicitly permitted.</p>
+   *
+   * <p>Implementations of this method must expect to be called on a
+   * fixed schedule.</p>
+
+   * <h2>Design Notes</h2>
+   *
+   * <p>This method emulates the <a
+   * href="https://github.com/kubernetes/client-go/blob/master/tools/cache/delta_fifo.go#L529">{@code
+   * Resync} function in the Go code's {@code DeltaFifo} construct</a>
+   * Specifically, it is anticipated that an implementation of this
+   * method that does not simply return will go through the internal
+   * resources that this {@link EventCache} knows about, and, for each
+   * that does not have an event queue set up for it
+   * already&mdash;i.e. for each that is not currently being
+   * processed&mdash; will fire a {@link SynchronizationEvent}.  This
+   * will have the effect of "heartbeating" the current desired state
+   * of the system "downstream" to processors that may wish to alter
+   * the actual state of the system to conform to it.</p>
+   *
+   * @see SynchronizationEvent
    */
   public void synchronize();
   

@@ -135,7 +135,7 @@ public class Controller<T extends HasMetadata> implements Closeable {
    *
    * @see EventQueueCollection#start(Consumer)
    */
-  private final EventQueueCollection<T> eventCache;
+  private final EventQueueCollection<T> eventQueueCollection;
 
   /**
    * A {@link Consumer} of {@link EventQueue}s that processes {@link
@@ -404,7 +404,7 @@ public class Controller<T extends HasMetadata> implements Closeable {
       this.logger.entering(cn, mn, new Object[] { operation, synchronizationExecutorService, synchronizationInterval, errorHandler, knownObjects, siphon });
     }
     this.siphon = Objects.requireNonNull(siphon);
-    this.eventCache = new ControllerEventQueueCollection(knownObjects, errorHandler, 16, 0.75f);
+    this.eventQueueCollection = new ControllerEventQueueCollection(knownObjects, errorHandler, 16, 0.75f);
     this.reflector = new ControllerReflector(operation, synchronizationExecutorService, synchronizationInterval, errorHandler);
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
@@ -450,7 +450,7 @@ public class Controller<T extends HasMetadata> implements Closeable {
     if (this.logger.isLoggable(Level.INFO)) {
       this.logger.logp(Level.INFO, cn, mn, "Starting {0}", this.siphon);
     }
-    final Future<?> siphonTask = this.eventCache.start(this.siphon);
+    final Future<?> siphonTask = this.eventQueueCollection.start(this.siphon);
     assert siphonTask != null;
     if (this.logger.isLoggable(Level.INFO)) {
       this.logger.logp(Level.INFO, cn, mn, "Starting {0}", this.reflector);
@@ -466,7 +466,7 @@ public class Controller<T extends HasMetadata> implements Closeable {
       siphonTask.cancel(true);
       assert siphonTask.isDone();
       try {
-        this.eventCache.close();
+        this.eventQueueCollection.close();
       } catch (final RuntimeException suppressMe) {
         runtimeException.addSuppressed(suppressMe);
       }
@@ -510,9 +510,9 @@ public class Controller<T extends HasMetadata> implements Closeable {
 
     try {
       if (this.logger.isLoggable(Level.INFO)) {
-        this.logger.logp(Level.INFO, cn, mn, "Closing {0}", this.eventCache);
+        this.logger.logp(Level.INFO, cn, mn, "Closing {0}", this.eventQueueCollection);
       }
-      this.eventCache.close();
+      this.eventQueueCollection.close();
     } catch (final RuntimeException runtimeException) {
       if (throwMe == null) {
         throw runtimeException;
@@ -748,7 +748,7 @@ public class Controller<T extends HasMetadata> implements Closeable {
     private <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> ControllerReflector(final X operation,
                                                                                                                                            final ScheduledExecutorService synchronizationExecutorService,
                                                                                                                                            final Duration synchronizationInterval, final Function<? super Throwable, Boolean> synchronizationErrorHandler) {
-      super(operation, Controller.this.eventCache, synchronizationExecutorService, synchronizationInterval, synchronizationErrorHandler);
+      super(operation, Controller.this.eventQueueCollection, synchronizationExecutorService, synchronizationInterval, synchronizationErrorHandler);
     }
 
 

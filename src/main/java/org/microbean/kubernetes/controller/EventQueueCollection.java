@@ -390,6 +390,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
             if (values != null && !values.isEmpty()) {
               for (final T knownObject : values) {
                 if (knownObject != null) {
+
                   // We follow the Go code in that we use *our* key
                   // extraction logic, rather than relying on the
                   // known key in the knownObjects map.
@@ -397,6 +398,10 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
                   if (key != null) {
                     final EventQueue<T> eventQueue = this.map.get(key);
                     if (eventQueue == null || eventQueue.isEmpty()) {
+                      // There was an object in our knownObjects map
+                      // somehow, but not in one of the queues we
+                      // manage.  Make sure others know about it.
+                      
                       // We make a SynchronizationEvent of type
                       // MODIFICATION.  shared_informer.go checks in
                       // its HandleDeltas function to see if oldObj
@@ -408,6 +413,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
                       this.synchronize(this, AbstractEvent.Type.MODIFICATION, knownObject, true /* yes, populate */);
                     }
                   }
+                  
                 }
               }
             }
@@ -675,7 +681,11 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * EventQueueCollection} and supplies them to the supplied {@link
    * Consumer}, and returns a {@link Future} representing this task.
    *
-   * <p>This method may return {@code null}.</p>
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>If this method has been called before, then the existing
+   * {@link Future} representing the task that was scheduled is
+   * returned instead.</p>
    *
    * <p>Invoking this method does not block the calling {@link
    * Thread}.</p>
@@ -684,8 +694,8 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * EventQueue} as it becomes ready; must not be {@code null}
    *
    * @return a {@link Future} representing the task that is feeding
-   * {@link EventQueue}s to the supplied {@link Consumer}, or {@code
-   * null} if no task was started
+   * {@link EventQueue}s to the supplied {@link Consumer}; never
+   * {@code null}
    *
    * @exception NullPointerException if {@code siphon} is {@code null}
    */
@@ -707,10 +717,9 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
           throw new IllegalStateException();
         }
         this.eventQueueConsumptionTask = this.consumerExecutor.scheduleWithFixedDelay(this.createEventQueueConsumptionTask(siphon), 0L, 1L, TimeUnit.SECONDS);
-        returnValue = this.eventQueueConsumptionTask;
-      } else {
-        returnValue = null;
       }
+      assert this.eventQueueConsumptionTask != null;
+      returnValue = this.eventQueueConsumptionTask;
     }
     
     if (this.logger.isLoggable(Level.FINER)) {

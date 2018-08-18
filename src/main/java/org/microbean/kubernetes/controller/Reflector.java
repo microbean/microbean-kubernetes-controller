@@ -405,6 +405,18 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     }
   }
 
+  /**
+   * As the name implies, sets up <em>synchronization</em>, which is
+   * the act of the downstream event cache telling its associated
+   * event listeners that there are items remaining to be processed.
+   *
+   * <p>This method schedules repeated invocations of the {@link
+   * #synchronize()} method.</p>
+   *
+   * @see #synchronize()
+   *
+   * @see EventCache#synchronize()
+   */
   private synchronized final void setUpSynchronization() {
     final String cn = this.getClass().getName();
     final String mn = "setUpSynchronization";
@@ -418,32 +430,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       if (this.logger.isLoggable(Level.INFO)) {
         this.logger.logp(Level.INFO, cn, mn, "Scheduling downstream synchronization every {0} seconds", Long.valueOf(this.synchronizationIntervalInSeconds));
       }
-      final ScheduledFuture<?> job = this.synchronizationExecutorService.scheduleWithFixedDelay(() -> {
-          if (shouldSynchronize()) {
-            if (logger.isLoggable(Level.FINE)) {
-              logger.logp(Level.FINE, cn, mn, "Synchronizing event cache with its downstream consumers");
-            }
-            Throwable throwable = null;
-            synchronized (eventCache) {
-              try {
-                eventCache.synchronize(); // only throws RuntimeException (i.e. no Exception, no InterruptedException)
-              } catch (final Throwable e) {
-                throwable = e;
-              }
-            }
-            if (throwable != null && !this.synchronizationErrorHandler.apply(throwable)) {
-              if (throwable instanceof RuntimeException) {
-                throw (RuntimeException)throwable;
-              } else if (throwable instanceof Error) {
-                throw (Error)throwable;
-              } else {
-                assert !(throwable instanceof Exception);
-              }
-            }              
-          }
-        }, 0L, this.synchronizationIntervalInSeconds, TimeUnit.SECONDS);
-      assert job != null;
-      this.synchronizationTask = job;
+      this.synchronizationTask = this.synchronizationExecutorService.scheduleWithFixedDelay(this::synchronize, 0L, this.synchronizationIntervalInSeconds, TimeUnit.SECONDS);
     }
 
     if (this.logger.isLoggable(Level.FINER)) {
@@ -451,10 +438,50 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     }
   }
 
+  private final void synchronize() {
+    final String cn = this.getClass().getName();
+    final String mn = "synchronize";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
+
+    if (this.shouldSynchronize()) {
+      if (this.logger.isLoggable(Level.FINE)) {
+        this.logger.logp(Level.FINE, cn, mn, "Synchronizing event cache with its downstream consumers");
+      }
+      Throwable throwable = null;
+      synchronized (this.eventCache) {
+        try {
+          this.eventCache.synchronize(); // only throws RuntimeException (i.e. no Exception, no InterruptedException)
+        } catch (final Throwable e) {
+          throwable = e;
+        }
+      }
+      if (throwable != null && !this.synchronizationErrorHandler.apply(throwable)) {
+        if (throwable instanceof RuntimeException) {
+          throw (RuntimeException)throwable;
+        } else if (throwable instanceof Error) {
+          throw (Error)throwable;
+        } else {
+          assert !(throwable instanceof Exception);
+        }
+      }              
+    }
+    
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
+  }
+  
   /**
    * Returns whether, at any given moment, this {@link Reflector}
    * should cause its {@link EventCache} to {@linkplain
    * EventCache#synchronize() synchronize}.
+   *
+   * <p>The default implementation of this method returns {@code true}
+   * if this {@link Reflector} was constructed with an explicit
+   * synchronization interval or {@link ScheduledExecutorService} or
+   * both.</p>
    *
    * <h2>Design Notes</h2>
    *
@@ -463,9 +490,11 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * when looking at all of this through an object-oriented lens is
    * that it is the {@link EventCache} (the {@code delta_fifo}, in the
    * Go code) that is ultimately in charge of synchronizing.  It is
-   * not clear why this is a function of a reflector.  In an
-   * object-oriented world, perhaps the {@link EventCache} itself
-   * should be in charge of resynchronization schedules.</p>
+   * not clear why in the Go code this is a function of a reflector.
+   * In an object-oriented world, perhaps the {@link EventCache}
+   * itself should be in charge of resynchronization schedules, but we
+   * choose to follow the Go code's division of responsibilities
+   * here.</p>
    *
    * @return {@code true} if this {@link Reflector} should cause its
    * {@link EventCache} to {@linkplain EventCache#synchronize()
@@ -521,7 +550,6 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         @SuppressWarnings("unchecked")
         final KubernetesResourceList<? extends T> list = ((Listable<? extends KubernetesResourceList<? extends T>>)this.operation).list();
         assert list != null;
-
         final ListMeta metadata = list.getMetadata();
         assert metadata != null;
         final String resourceVersion = metadata.getResourceVersion();
@@ -546,12 +574,22 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         
         // Now that we've vetted that our list operation works (i.e. no
         // syntax errors, no connectivity problems) we can schedule
-        // resynchronizations if necessary.
+        // synchronizations if necessary.
+        //
+        // A synchronization is an operation where, if allowed, our
+        // eventCache goes through its set of known objects and--for
+        // any that are not enqueued for further processing
+        // already--fires a synchronization event of type
+        // MODIFICATION.  This happens on a schedule, not in reaction
+        // to an event.  This allows its downstream processors a
+        // chance to try to bring system state in line with desired
+        // state, even if no events have occurred (kind of like a
+        // heartbeat).  See
+        // https://engineering.bitnami.com/articles/a-deep-dive-into-kubernetes-controllers.html#resyncperiod.
         this.setUpSynchronization();
         
         // Now that we've taken care of our list() operation, set up our
         // watch() operation.
-
         @SuppressWarnings("unchecked")
         final Versionable<? extends Watchable<? extends Closeable, Watcher<T>>> versionableOperation = (Versionable<? extends Watchable<? extends Closeable, Watcher<T>>>)this.operation;
         this.watch = withResourceVersion(versionableOperation, resourceVersion).watch(new WatchHandler());
