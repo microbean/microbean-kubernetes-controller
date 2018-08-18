@@ -215,11 +215,17 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
               synchronized (this.knownObjects) {
 
                 if (Event.Type.DELETION.equals(eventType)) {
+
+                  // "Forget" (untrack) the object in question.
                   priorResource = this.knownObjects.remove(key);
+
                   newEvent = event;
                 } else {
                   assert eventType.equals(Event.Type.ADDITION) || eventType.equals(Event.Type.MODIFICATION);
+
+                  // "Learn" (track) the resource in question.
                   priorResource = this.knownObjects.put(key, newResource);
+
                   if (event instanceof SynchronizationEvent) {
                     if (priorResource == null) {
                       assert Event.Type.ADDITION.equals(eventType) : "!Event.Type.ADDITION.equals(eventType): " + eventType;

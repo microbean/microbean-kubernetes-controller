@@ -63,11 +63,6 @@ public class TestReflectorBasics {
   public void testBasics() throws Exception {
     assumeFalse(Boolean.getBoolean("skipClusterTests"));
 
-    final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(1);
-    assertNotNull(executorService);
-
-    final DefaultKubernetesClient client = new DefaultKubernetesClient();
-
     // We'll use this as our "known objects".
     final Map<Object, ConfigMap> configMaps = new HashMap<>();
 
@@ -77,25 +72,15 @@ public class TestReflectorBasics {
 
     // Create a consumer that can remove and process EventQueues from
     // our EventCache implementation.  It will also update our "known
-    // objects".
-    final Consumer<? super EventQueue<? extends ConfigMap>> siphon = (q) -> {
-      assertNotNull(q);
-      assertFalse(q.isEmpty());
-      for (final AbstractEvent<? extends ConfigMap> event : q) {
-        assertNotNull(event);
-        System.out.println("*** received event: " + event);
-        final Event.Type type = event.getType();
-        assertNotNull(type);
-        switch (type) {
-        case DELETION:
-          configMaps.remove(event.getKey());
-          break;
-        default:
-          configMaps.put(event.getKey(), event.getResource());
-          break;
+    // objects" as necessary.
+    final Consumer<? super EventQueue<? extends ConfigMap>> siphon =
+      new ResourceTrackingEventQueueConsumer<ConfigMap>(configMaps) {
+        @Override
+        protected final void accept(final AbstractEvent<? extends ConfigMap> event) {
+          assertNotNull(event);
+          System.out.println("*** received event: " + event);
         }
-      }
-    };
+      };
 
     // Begin sucking EventQueue instances out of the cache on a
     // separate Thread.  Obviously there aren't any yet.  This creates
@@ -104,6 +89,13 @@ public class TestReflectorBasics {
     // EventQueueCollection.
     eventQueues.start(siphon);
 
+    // Connect to Kubernetes using a combination of system properties,
+    // environment variables and ~/.kube/config settings as detailed
+    // here:
+    // https://github.com/fabric8io/kubernetes-client/blob/v3.2.0/README.md#configuring-the-client.
+    // We'll use this client when we create a Reflector below.
+    final DefaultKubernetesClient client = new DefaultKubernetesClient();
+
     // Now create a Reflector that we'll then hook up to Kubernetes
     // and instruct to "reflect" its events "into" our
     // EventQueueCollection, thus making EventQueues available to the
@@ -111,7 +103,6 @@ public class TestReflectorBasics {
     final Reflector<ConfigMap> reflector =
       new Reflector<ConfigMap>(client.configMaps(),
                                eventQueues,
-                               executorService,
                                Duration.ofSeconds(10));
 
     // Start the reflection process: this effectively puts EventQueue
@@ -125,13 +116,15 @@ public class TestReflectorBasics {
     // all the additions, updates, deletions and synchronizations.
     Thread.sleep(1L * 60L * 1000L);
 
-    // Shut down production of events (notably before we shut down
-    // consumption of events).
+    // Close the Reflector.  This cancels any scheduled
+    // synchronization tasks.
     reflector.close();
+    
+    // Close the client, now that no one will be calling it anymore.
     client.close();
 
-    // Shut down reception of events (notably after we shut down
-    // production).
+    // Shut down reception of events now that no one is making any
+    // more of them.
     eventQueues.close();
   }
 
