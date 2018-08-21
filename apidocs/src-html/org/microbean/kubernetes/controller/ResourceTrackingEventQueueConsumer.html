@@ -223,143 +223,149 @@
 <span class="sourceLineNo">215</span>              synchronized (this.knownObjects) {<a name="line.215"></a>
 <span class="sourceLineNo">216</span><a name="line.216"></a>
 <span class="sourceLineNo">217</span>                if (Event.Type.DELETION.equals(eventType)) {<a name="line.217"></a>
-<span class="sourceLineNo">218</span>                  priorResource = this.knownObjects.remove(key);<a name="line.218"></a>
-<span class="sourceLineNo">219</span>                  newEvent = event;<a name="line.219"></a>
-<span class="sourceLineNo">220</span>                } else {<a name="line.220"></a>
-<span class="sourceLineNo">221</span>                  assert eventType.equals(Event.Type.ADDITION) || eventType.equals(Event.Type.MODIFICATION);<a name="line.221"></a>
-<span class="sourceLineNo">222</span>                  priorResource = this.knownObjects.put(key, newResource);<a name="line.222"></a>
-<span class="sourceLineNo">223</span>                  if (event instanceof SynchronizationEvent) {<a name="line.223"></a>
-<span class="sourceLineNo">224</span>                    if (priorResource == null) {<a name="line.224"></a>
-<span class="sourceLineNo">225</span>                      assert Event.Type.ADDITION.equals(eventType) : "!Event.Type.ADDITION.equals(eventType): " + eventType;<a name="line.225"></a>
-<span class="sourceLineNo">226</span>                      newEvent = event;<a name="line.226"></a>
-<span class="sourceLineNo">227</span>                    } else {<a name="line.227"></a>
-<span class="sourceLineNo">228</span>                      assert Event.Type.MODIFICATION.equals(eventType) : "!Event.Type.MODIFICATION.equals(eventType): " + eventType;<a name="line.228"></a>
-<span class="sourceLineNo">229</span>                      newEvent = this.createSynchronizationEvent(Event.Type.MODIFICATION, priorResource, newResource);<a name="line.229"></a>
-<span class="sourceLineNo">230</span>                    }<a name="line.230"></a>
-<span class="sourceLineNo">231</span>                  } else if (priorResource == null) {<a name="line.231"></a>
-<span class="sourceLineNo">232</span>                    if (Event.Type.ADDITION.equals(eventType)) {<a name="line.232"></a>
-<span class="sourceLineNo">233</span>                      newEvent = event;<a name="line.233"></a>
-<span class="sourceLineNo">234</span>                    } else {<a name="line.234"></a>
-<span class="sourceLineNo">235</span>                      newEvent = this.createEvent(Event.Type.ADDITION, null, newResource);<a name="line.235"></a>
+<span class="sourceLineNo">218</span><a name="line.218"></a>
+<span class="sourceLineNo">219</span>                  // "Forget" (untrack) the object in question.<a name="line.219"></a>
+<span class="sourceLineNo">220</span>                  priorResource = this.knownObjects.remove(key);<a name="line.220"></a>
+<span class="sourceLineNo">221</span><a name="line.221"></a>
+<span class="sourceLineNo">222</span>                  newEvent = event;<a name="line.222"></a>
+<span class="sourceLineNo">223</span>                } else {<a name="line.223"></a>
+<span class="sourceLineNo">224</span>                  assert eventType.equals(Event.Type.ADDITION) || eventType.equals(Event.Type.MODIFICATION);<a name="line.224"></a>
+<span class="sourceLineNo">225</span><a name="line.225"></a>
+<span class="sourceLineNo">226</span>                  // "Learn" (track) the resource in question.<a name="line.226"></a>
+<span class="sourceLineNo">227</span>                  priorResource = this.knownObjects.put(key, newResource);<a name="line.227"></a>
+<span class="sourceLineNo">228</span><a name="line.228"></a>
+<span class="sourceLineNo">229</span>                  if (event instanceof SynchronizationEvent) {<a name="line.229"></a>
+<span class="sourceLineNo">230</span>                    if (priorResource == null) {<a name="line.230"></a>
+<span class="sourceLineNo">231</span>                      assert Event.Type.ADDITION.equals(eventType) : "!Event.Type.ADDITION.equals(eventType): " + eventType;<a name="line.231"></a>
+<span class="sourceLineNo">232</span>                      newEvent = event;<a name="line.232"></a>
+<span class="sourceLineNo">233</span>                    } else {<a name="line.233"></a>
+<span class="sourceLineNo">234</span>                      assert Event.Type.MODIFICATION.equals(eventType) : "!Event.Type.MODIFICATION.equals(eventType): " + eventType;<a name="line.234"></a>
+<span class="sourceLineNo">235</span>                      newEvent = this.createSynchronizationEvent(Event.Type.MODIFICATION, priorResource, newResource);<a name="line.235"></a>
 <span class="sourceLineNo">236</span>                    }<a name="line.236"></a>
-<span class="sourceLineNo">237</span>                  } else {<a name="line.237"></a>
-<span class="sourceLineNo">238</span>                    newEvent = this.createEvent(Event.Type.MODIFICATION, priorResource, newResource);<a name="line.238"></a>
-<span class="sourceLineNo">239</span>                  }<a name="line.239"></a>
-<span class="sourceLineNo">240</span>                }<a name="line.240"></a>
-<span class="sourceLineNo">241</span>                <a name="line.241"></a>
-<span class="sourceLineNo">242</span>              }<a name="line.242"></a>
-<span class="sourceLineNo">243</span>            }<a name="line.243"></a>
-<span class="sourceLineNo">244</span>            <a name="line.244"></a>
-<span class="sourceLineNo">245</span>            assert newEvent != null;<a name="line.245"></a>
-<span class="sourceLineNo">246</span>            assert newEvent instanceof SynchronizationEvent || newEvent instanceof Event;<a name="line.246"></a>
-<span class="sourceLineNo">247</span>            this.accept(newEvent);<a name="line.247"></a>
-<span class="sourceLineNo">248</span>          }<a name="line.248"></a>
-<span class="sourceLineNo">249</span>        }<a name="line.249"></a>
-<span class="sourceLineNo">250</span>        <a name="line.250"></a>
-<span class="sourceLineNo">251</span>      }<a name="line.251"></a>
-<span class="sourceLineNo">252</span>    }<a name="line.252"></a>
-<span class="sourceLineNo">253</span>    if (this.logger.isLoggable(Level.FINER)) {<a name="line.253"></a>
-<span class="sourceLineNo">254</span>      this.logger.exiting(cn, mn);<a name="line.254"></a>
-<span class="sourceLineNo">255</span>    }<a name="line.255"></a>
-<span class="sourceLineNo">256</span>  }<a name="line.256"></a>
-<span class="sourceLineNo">257</span><a name="line.257"></a>
-<span class="sourceLineNo">258</span>  /**<a name="line.258"></a>
-<span class="sourceLineNo">259</span>   * Creates and returns a new {@link Event}.<a name="line.259"></a>
-<span class="sourceLineNo">260</span>   *<a name="line.260"></a>
-<span class="sourceLineNo">261</span>   * &lt;p&gt;This method never returns {@code null}.&lt;/p&gt;<a name="line.261"></a>
-<span class="sourceLineNo">262</span>   *<a name="line.262"></a>
-<span class="sourceLineNo">263</span>   * &lt;p&gt;Overrides of this method must not return {@code null}.&lt;/p&gt;<a name="line.263"></a>
-<span class="sourceLineNo">264</span>   *<a name="line.264"></a>
-<span class="sourceLineNo">265</span>   * @param eventType the {@link AbstractEvent.Type} for the new<a name="line.265"></a>
-<span class="sourceLineNo">266</span>   * {@link Event}; must not be {@code null}; when supplied by the<a name="line.266"></a>
-<span class="sourceLineNo">267</span>   * {@link #accept(EventQueue)} method's internals, will always be<a name="line.267"></a>
-<span class="sourceLineNo">268</span>   * either {@link AbstractEvent.Type#ADDITION} or {@link<a name="line.268"></a>
-<span class="sourceLineNo">269</span>   * AbstractEvent.Type#MODIFICATION}<a name="line.269"></a>
+<span class="sourceLineNo">237</span>                  } else if (priorResource == null) {<a name="line.237"></a>
+<span class="sourceLineNo">238</span>                    if (Event.Type.ADDITION.equals(eventType)) {<a name="line.238"></a>
+<span class="sourceLineNo">239</span>                      newEvent = event;<a name="line.239"></a>
+<span class="sourceLineNo">240</span>                    } else {<a name="line.240"></a>
+<span class="sourceLineNo">241</span>                      newEvent = this.createEvent(Event.Type.ADDITION, null, newResource);<a name="line.241"></a>
+<span class="sourceLineNo">242</span>                    }<a name="line.242"></a>
+<span class="sourceLineNo">243</span>                  } else {<a name="line.243"></a>
+<span class="sourceLineNo">244</span>                    newEvent = this.createEvent(Event.Type.MODIFICATION, priorResource, newResource);<a name="line.244"></a>
+<span class="sourceLineNo">245</span>                  }<a name="line.245"></a>
+<span class="sourceLineNo">246</span>                }<a name="line.246"></a>
+<span class="sourceLineNo">247</span>                <a name="line.247"></a>
+<span class="sourceLineNo">248</span>              }<a name="line.248"></a>
+<span class="sourceLineNo">249</span>            }<a name="line.249"></a>
+<span class="sourceLineNo">250</span>            <a name="line.250"></a>
+<span class="sourceLineNo">251</span>            assert newEvent != null;<a name="line.251"></a>
+<span class="sourceLineNo">252</span>            assert newEvent instanceof SynchronizationEvent || newEvent instanceof Event;<a name="line.252"></a>
+<span class="sourceLineNo">253</span>            this.accept(newEvent);<a name="line.253"></a>
+<span class="sourceLineNo">254</span>          }<a name="line.254"></a>
+<span class="sourceLineNo">255</span>        }<a name="line.255"></a>
+<span class="sourceLineNo">256</span>        <a name="line.256"></a>
+<span class="sourceLineNo">257</span>      }<a name="line.257"></a>
+<span class="sourceLineNo">258</span>    }<a name="line.258"></a>
+<span class="sourceLineNo">259</span>    if (this.logger.isLoggable(Level.FINER)) {<a name="line.259"></a>
+<span class="sourceLineNo">260</span>      this.logger.exiting(cn, mn);<a name="line.260"></a>
+<span class="sourceLineNo">261</span>    }<a name="line.261"></a>
+<span class="sourceLineNo">262</span>  }<a name="line.262"></a>
+<span class="sourceLineNo">263</span><a name="line.263"></a>
+<span class="sourceLineNo">264</span>  /**<a name="line.264"></a>
+<span class="sourceLineNo">265</span>   * Creates and returns a new {@link Event}.<a name="line.265"></a>
+<span class="sourceLineNo">266</span>   *<a name="line.266"></a>
+<span class="sourceLineNo">267</span>   * &lt;p&gt;This method never returns {@code null}.&lt;/p&gt;<a name="line.267"></a>
+<span class="sourceLineNo">268</span>   *<a name="line.268"></a>
+<span class="sourceLineNo">269</span>   * &lt;p&gt;Overrides of this method must not return {@code null}.&lt;/p&gt;<a name="line.269"></a>
 <span class="sourceLineNo">270</span>   *<a name="line.270"></a>
-<span class="sourceLineNo">271</span>   * @param priorResource the prior state of the resource the new<a name="line.271"></a>
-<span class="sourceLineNo">272</span>   * {@link Event} will represent; may be (and often is) {@code null}<a name="line.272"></a>
-<span class="sourceLineNo">273</span>   *<a name="line.273"></a>
-<span class="sourceLineNo">274</span>   * @param resource the latest state of the resource the new {@link<a name="line.274"></a>
-<span class="sourceLineNo">275</span>   * Event} will represent; must not be {@code null}<a name="line.275"></a>
+<span class="sourceLineNo">271</span>   * @param eventType the {@link AbstractEvent.Type} for the new<a name="line.271"></a>
+<span class="sourceLineNo">272</span>   * {@link Event}; must not be {@code null}; when supplied by the<a name="line.272"></a>
+<span class="sourceLineNo">273</span>   * {@link #accept(EventQueue)} method's internals, will always be<a name="line.273"></a>
+<span class="sourceLineNo">274</span>   * either {@link AbstractEvent.Type#ADDITION} or {@link<a name="line.274"></a>
+<span class="sourceLineNo">275</span>   * AbstractEvent.Type#MODIFICATION}<a name="line.275"></a>
 <span class="sourceLineNo">276</span>   *<a name="line.276"></a>
-<span class="sourceLineNo">277</span>   * @return a new, non-{@code null} {@link Event} with each<a name="line.277"></a>
-<span class="sourceLineNo">278</span>   * invocation<a name="line.278"></a>
+<span class="sourceLineNo">277</span>   * @param priorResource the prior state of the resource the new<a name="line.277"></a>
+<span class="sourceLineNo">278</span>   * {@link Event} will represent; may be (and often is) {@code null}<a name="line.278"></a>
 <span class="sourceLineNo">279</span>   *<a name="line.279"></a>
-<span class="sourceLineNo">280</span>   * @exception NullPointerException if {@code eventType} or {@code<a name="line.280"></a>
-<span class="sourceLineNo">281</span>   * resource} is {@code null}<a name="line.281"></a>
-<span class="sourceLineNo">282</span>   */<a name="line.282"></a>
-<span class="sourceLineNo">283</span>  protected Event&lt;T&gt; createEvent(final Event.Type eventType, final T priorResource, final T resource) {<a name="line.283"></a>
-<span class="sourceLineNo">284</span>    final String cn = this.getClass().getName();<a name="line.284"></a>
-<span class="sourceLineNo">285</span>    final String mn = "createEvent";<a name="line.285"></a>
-<span class="sourceLineNo">286</span>    if (this.logger.isLoggable(Level.FINER)) {<a name="line.286"></a>
-<span class="sourceLineNo">287</span>      this.logger.entering(cn, mn, new Object[] { eventType, priorResource, resource });<a name="line.287"></a>
-<span class="sourceLineNo">288</span>    }<a name="line.288"></a>
-<span class="sourceLineNo">289</span>    Objects.requireNonNull(eventType);<a name="line.289"></a>
-<span class="sourceLineNo">290</span>    final Event&lt;T&gt; returnValue = new Event&lt;&gt;(this, eventType, priorResource, resource);<a name="line.290"></a>
-<span class="sourceLineNo">291</span>    if (this.logger.isLoggable(Level.FINER)) {<a name="line.291"></a>
-<span class="sourceLineNo">292</span>      this.logger.exiting(cn, mn, returnValue);<a name="line.292"></a>
-<span class="sourceLineNo">293</span>    }<a name="line.293"></a>
-<span class="sourceLineNo">294</span>    return returnValue;<a name="line.294"></a>
-<span class="sourceLineNo">295</span>  }<a name="line.295"></a>
-<span class="sourceLineNo">296</span><a name="line.296"></a>
-<span class="sourceLineNo">297</span>  /**<a name="line.297"></a>
-<span class="sourceLineNo">298</span>   * Creates and returns a new {@link SynchronizationEvent}.<a name="line.298"></a>
-<span class="sourceLineNo">299</span>   *<a name="line.299"></a>
-<span class="sourceLineNo">300</span>   * &lt;p&gt;This method never returns {@code null}.&lt;/p&gt;<a name="line.300"></a>
-<span class="sourceLineNo">301</span>   *<a name="line.301"></a>
-<span class="sourceLineNo">302</span>   * &lt;p&gt;Overrides of this method must not return {@code null}.&lt;/p&gt;<a name="line.302"></a>
-<span class="sourceLineNo">303</span>   *<a name="line.303"></a>
-<span class="sourceLineNo">304</span>   * @param eventType the {@link AbstractEvent.Type} for the new<a name="line.304"></a>
-<span class="sourceLineNo">305</span>   * {@link SynchronizationEvent}; must not be {@code null}; when<a name="line.305"></a>
-<span class="sourceLineNo">306</span>   * supplied by the {@link #accept(EventQueue)} method's internals,<a name="line.306"></a>
-<span class="sourceLineNo">307</span>   * will always be {@link AbstractEvent.Type#MODIFICATION}<a name="line.307"></a>
-<span class="sourceLineNo">308</span>   *<a name="line.308"></a>
-<span class="sourceLineNo">309</span>   * @param priorResource the prior state of the resource the new<a name="line.309"></a>
-<span class="sourceLineNo">310</span>   * {@link SynchronizationEvent} will represent; may be (and often<a name="line.310"></a>
-<span class="sourceLineNo">311</span>   * is) {@code null}<a name="line.311"></a>
-<span class="sourceLineNo">312</span>   *<a name="line.312"></a>
-<span class="sourceLineNo">313</span>   * @param resource the latest state of the resource the new {@link<a name="line.313"></a>
-<span class="sourceLineNo">314</span>   * SynchronizationEvent} will represent; must not be {@code null}<a name="line.314"></a>
-<span class="sourceLineNo">315</span>   *<a name="line.315"></a>
-<span class="sourceLineNo">316</span>   * @return a new, non-{@code null} {@link SynchronizationEvent} with<a name="line.316"></a>
-<span class="sourceLineNo">317</span>   * each invocation<a name="line.317"></a>
+<span class="sourceLineNo">280</span>   * @param resource the latest state of the resource the new {@link<a name="line.280"></a>
+<span class="sourceLineNo">281</span>   * Event} will represent; must not be {@code null}<a name="line.281"></a>
+<span class="sourceLineNo">282</span>   *<a name="line.282"></a>
+<span class="sourceLineNo">283</span>   * @return a new, non-{@code null} {@link Event} with each<a name="line.283"></a>
+<span class="sourceLineNo">284</span>   * invocation<a name="line.284"></a>
+<span class="sourceLineNo">285</span>   *<a name="line.285"></a>
+<span class="sourceLineNo">286</span>   * @exception NullPointerException if {@code eventType} or {@code<a name="line.286"></a>
+<span class="sourceLineNo">287</span>   * resource} is {@code null}<a name="line.287"></a>
+<span class="sourceLineNo">288</span>   */<a name="line.288"></a>
+<span class="sourceLineNo">289</span>  protected Event&lt;T&gt; createEvent(final Event.Type eventType, final T priorResource, final T resource) {<a name="line.289"></a>
+<span class="sourceLineNo">290</span>    final String cn = this.getClass().getName();<a name="line.290"></a>
+<span class="sourceLineNo">291</span>    final String mn = "createEvent";<a name="line.291"></a>
+<span class="sourceLineNo">292</span>    if (this.logger.isLoggable(Level.FINER)) {<a name="line.292"></a>
+<span class="sourceLineNo">293</span>      this.logger.entering(cn, mn, new Object[] { eventType, priorResource, resource });<a name="line.293"></a>
+<span class="sourceLineNo">294</span>    }<a name="line.294"></a>
+<span class="sourceLineNo">295</span>    Objects.requireNonNull(eventType);<a name="line.295"></a>
+<span class="sourceLineNo">296</span>    final Event&lt;T&gt; returnValue = new Event&lt;&gt;(this, eventType, priorResource, resource);<a name="line.296"></a>
+<span class="sourceLineNo">297</span>    if (this.logger.isLoggable(Level.FINER)) {<a name="line.297"></a>
+<span class="sourceLineNo">298</span>      this.logger.exiting(cn, mn, returnValue);<a name="line.298"></a>
+<span class="sourceLineNo">299</span>    }<a name="line.299"></a>
+<span class="sourceLineNo">300</span>    return returnValue;<a name="line.300"></a>
+<span class="sourceLineNo">301</span>  }<a name="line.301"></a>
+<span class="sourceLineNo">302</span><a name="line.302"></a>
+<span class="sourceLineNo">303</span>  /**<a name="line.303"></a>
+<span class="sourceLineNo">304</span>   * Creates and returns a new {@link SynchronizationEvent}.<a name="line.304"></a>
+<span class="sourceLineNo">305</span>   *<a name="line.305"></a>
+<span class="sourceLineNo">306</span>   * &lt;p&gt;This method never returns {@code null}.&lt;/p&gt;<a name="line.306"></a>
+<span class="sourceLineNo">307</span>   *<a name="line.307"></a>
+<span class="sourceLineNo">308</span>   * &lt;p&gt;Overrides of this method must not return {@code null}.&lt;/p&gt;<a name="line.308"></a>
+<span class="sourceLineNo">309</span>   *<a name="line.309"></a>
+<span class="sourceLineNo">310</span>   * @param eventType the {@link AbstractEvent.Type} for the new<a name="line.310"></a>
+<span class="sourceLineNo">311</span>   * {@link SynchronizationEvent}; must not be {@code null}; when<a name="line.311"></a>
+<span class="sourceLineNo">312</span>   * supplied by the {@link #accept(EventQueue)} method's internals,<a name="line.312"></a>
+<span class="sourceLineNo">313</span>   * will always be {@link AbstractEvent.Type#MODIFICATION}<a name="line.313"></a>
+<span class="sourceLineNo">314</span>   *<a name="line.314"></a>
+<span class="sourceLineNo">315</span>   * @param priorResource the prior state of the resource the new<a name="line.315"></a>
+<span class="sourceLineNo">316</span>   * {@link SynchronizationEvent} will represent; may be (and often<a name="line.316"></a>
+<span class="sourceLineNo">317</span>   * is) {@code null}<a name="line.317"></a>
 <span class="sourceLineNo">318</span>   *<a name="line.318"></a>
-<span class="sourceLineNo">319</span>   * @exception NullPointerException if {@code eventType} or {@code<a name="line.319"></a>
-<span class="sourceLineNo">320</span>   * resource} is {@code null}<a name="line.320"></a>
-<span class="sourceLineNo">321</span>   */<a name="line.321"></a>
-<span class="sourceLineNo">322</span>  protected SynchronizationEvent&lt;T&gt; createSynchronizationEvent(final Event.Type eventType, final T priorResource, final T resource) {<a name="line.322"></a>
-<span class="sourceLineNo">323</span>    final String cn = this.getClass().getName();<a name="line.323"></a>
-<span class="sourceLineNo">324</span>    final String mn = "createSynchronizationEvent";<a name="line.324"></a>
-<span class="sourceLineNo">325</span>    if (this.logger.isLoggable(Level.FINER)) {<a name="line.325"></a>
-<span class="sourceLineNo">326</span>      this.logger.entering(cn, mn, new Object[] { eventType, priorResource, resource });<a name="line.326"></a>
-<span class="sourceLineNo">327</span>    }<a name="line.327"></a>
-<span class="sourceLineNo">328</span>    Objects.requireNonNull(eventType);<a name="line.328"></a>
-<span class="sourceLineNo">329</span>    final SynchronizationEvent&lt;T&gt; returnValue = new SynchronizationEvent&lt;&gt;(this, eventType, priorResource, resource);<a name="line.329"></a>
-<span class="sourceLineNo">330</span>    if (this.logger.isLoggable(Level.FINER)) {<a name="line.330"></a>
-<span class="sourceLineNo">331</span>      this.logger.exiting(cn, mn, returnValue);<a name="line.331"></a>
-<span class="sourceLineNo">332</span>    }<a name="line.332"></a>
-<span class="sourceLineNo">333</span>    return returnValue;<a name="line.333"></a>
-<span class="sourceLineNo">334</span>  }<a name="line.334"></a>
-<span class="sourceLineNo">335</span><a name="line.335"></a>
-<span class="sourceLineNo">336</span>  /**<a name="line.336"></a>
-<span class="sourceLineNo">337</span>   * Called to process a given {@link AbstractEvent} from the {@link<a name="line.337"></a>
-<span class="sourceLineNo">338</span>   * EventQueue} supplied to the {@link #accept(EventQueue)} method,<a name="line.338"></a>
-<span class="sourceLineNo">339</span>   * &lt;strong&gt;with that {@link EventQueue}'s monitor held&lt;/strong&gt;.<a name="line.339"></a>
-<span class="sourceLineNo">340</span>   *<a name="line.340"></a>
-<span class="sourceLineNo">341</span>   * &lt;p&gt;Implementations of this method should be relatively fast as<a name="line.341"></a>
-<span class="sourceLineNo">342</span>   * this method dictates the speed of {@link EventQueue}<a name="line.342"></a>
-<span class="sourceLineNo">343</span>   * processing.&lt;/p&gt;<a name="line.343"></a>
-<span class="sourceLineNo">344</span>   *<a name="line.344"></a>
-<span class="sourceLineNo">345</span>   * @param event the {@link AbstractEvent} encountered in the {@link<a name="line.345"></a>
-<span class="sourceLineNo">346</span>   * EventQueue}; must not be {@code null}<a name="line.346"></a>
-<span class="sourceLineNo">347</span>   *<a name="line.347"></a>
-<span class="sourceLineNo">348</span>   * @exception NullPointerException if {@code event} is {@code null}<a name="line.348"></a>
-<span class="sourceLineNo">349</span>   *<a name="line.349"></a>
-<span class="sourceLineNo">350</span>   * @see #accept(EventQueue)<a name="line.350"></a>
-<span class="sourceLineNo">351</span>   */<a name="line.351"></a>
-<span class="sourceLineNo">352</span>  protected abstract void accept(final AbstractEvent&lt;? extends T&gt; event);<a name="line.352"></a>
-<span class="sourceLineNo">353</span>  <a name="line.353"></a>
-<span class="sourceLineNo">354</span>}<a name="line.354"></a>
+<span class="sourceLineNo">319</span>   * @param resource the latest state of the resource the new {@link<a name="line.319"></a>
+<span class="sourceLineNo">320</span>   * SynchronizationEvent} will represent; must not be {@code null}<a name="line.320"></a>
+<span class="sourceLineNo">321</span>   *<a name="line.321"></a>
+<span class="sourceLineNo">322</span>   * @return a new, non-{@code null} {@link SynchronizationEvent} with<a name="line.322"></a>
+<span class="sourceLineNo">323</span>   * each invocation<a name="line.323"></a>
+<span class="sourceLineNo">324</span>   *<a name="line.324"></a>
+<span class="sourceLineNo">325</span>   * @exception NullPointerException if {@code eventType} or {@code<a name="line.325"></a>
+<span class="sourceLineNo">326</span>   * resource} is {@code null}<a name="line.326"></a>
+<span class="sourceLineNo">327</span>   */<a name="line.327"></a>
+<span class="sourceLineNo">328</span>  protected SynchronizationEvent&lt;T&gt; createSynchronizationEvent(final Event.Type eventType, final T priorResource, final T resource) {<a name="line.328"></a>
+<span class="sourceLineNo">329</span>    final String cn = this.getClass().getName();<a name="line.329"></a>
+<span class="sourceLineNo">330</span>    final String mn = "createSynchronizationEvent";<a name="line.330"></a>
+<span class="sourceLineNo">331</span>    if (this.logger.isLoggable(Level.FINER)) {<a name="line.331"></a>
+<span class="sourceLineNo">332</span>      this.logger.entering(cn, mn, new Object[] { eventType, priorResource, resource });<a name="line.332"></a>
+<span class="sourceLineNo">333</span>    }<a name="line.333"></a>
+<span class="sourceLineNo">334</span>    Objects.requireNonNull(eventType);<a name="line.334"></a>
+<span class="sourceLineNo">335</span>    final SynchronizationEvent&lt;T&gt; returnValue = new SynchronizationEvent&lt;&gt;(this, eventType, priorResource, resource);<a name="line.335"></a>
+<span class="sourceLineNo">336</span>    if (this.logger.isLoggable(Level.FINER)) {<a name="line.336"></a>
+<span class="sourceLineNo">337</span>      this.logger.exiting(cn, mn, returnValue);<a name="line.337"></a>
+<span class="sourceLineNo">338</span>    }<a name="line.338"></a>
+<span class="sourceLineNo">339</span>    return returnValue;<a name="line.339"></a>
+<span class="sourceLineNo">340</span>  }<a name="line.340"></a>
+<span class="sourceLineNo">341</span><a name="line.341"></a>
+<span class="sourceLineNo">342</span>  /**<a name="line.342"></a>
+<span class="sourceLineNo">343</span>   * Called to process a given {@link AbstractEvent} from the {@link<a name="line.343"></a>
+<span class="sourceLineNo">344</span>   * EventQueue} supplied to the {@link #accept(EventQueue)} method,<a name="line.344"></a>
+<span class="sourceLineNo">345</span>   * &lt;strong&gt;with that {@link EventQueue}'s monitor held&lt;/strong&gt;.<a name="line.345"></a>
+<span class="sourceLineNo">346</span>   *<a name="line.346"></a>
+<span class="sourceLineNo">347</span>   * &lt;p&gt;Implementations of this method should be relatively fast as<a name="line.347"></a>
+<span class="sourceLineNo">348</span>   * this method dictates the speed of {@link EventQueue}<a name="line.348"></a>
+<span class="sourceLineNo">349</span>   * processing.&lt;/p&gt;<a name="line.349"></a>
+<span class="sourceLineNo">350</span>   *<a name="line.350"></a>
+<span class="sourceLineNo">351</span>   * @param event the {@link AbstractEvent} encountered in the {@link<a name="line.351"></a>
+<span class="sourceLineNo">352</span>   * EventQueue}; must not be {@code null}<a name="line.352"></a>
+<span class="sourceLineNo">353</span>   *<a name="line.353"></a>
+<span class="sourceLineNo">354</span>   * @exception NullPointerException if {@code event} is {@code null}<a name="line.354"></a>
+<span class="sourceLineNo">355</span>   *<a name="line.355"></a>
+<span class="sourceLineNo">356</span>   * @see #accept(EventQueue)<a name="line.356"></a>
+<span class="sourceLineNo">357</span>   */<a name="line.357"></a>
+<span class="sourceLineNo">358</span>  protected abstract void accept(final AbstractEvent&lt;? extends T&gt; event);<a name="line.358"></a>
+<span class="sourceLineNo">359</span>  <a name="line.359"></a>
+<span class="sourceLineNo">360</span>}<a name="line.360"></a>
 
 
 

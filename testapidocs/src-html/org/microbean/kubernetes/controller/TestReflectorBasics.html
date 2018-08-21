@@ -71,79 +71,76 @@
 <span class="sourceLineNo">063</span>  public void testBasics() throws Exception {<a name="line.63"></a>
 <span class="sourceLineNo">064</span>    assumeFalse(Boolean.getBoolean("skipClusterTests"));<a name="line.64"></a>
 <span class="sourceLineNo">065</span><a name="line.65"></a>
-<span class="sourceLineNo">066</span>    final ScheduledExecutorService executorService = Executors.newScheduledThreadPool(1);<a name="line.66"></a>
-<span class="sourceLineNo">067</span>    assertNotNull(executorService);<a name="line.67"></a>
+<span class="sourceLineNo">066</span>    // We'll use this as our "known objects".<a name="line.66"></a>
+<span class="sourceLineNo">067</span>    final Map&lt;Object, ConfigMap&gt; configMaps = new HashMap&lt;&gt;();<a name="line.67"></a>
 <span class="sourceLineNo">068</span><a name="line.68"></a>
-<span class="sourceLineNo">069</span>    final DefaultKubernetesClient client = new DefaultKubernetesClient();<a name="line.69"></a>
-<span class="sourceLineNo">070</span><a name="line.70"></a>
-<span class="sourceLineNo">071</span>    // We'll use this as our "known objects".<a name="line.71"></a>
-<span class="sourceLineNo">072</span>    final Map&lt;Object, ConfigMap&gt; configMaps = new HashMap&lt;&gt;();<a name="line.72"></a>
-<span class="sourceLineNo">073</span><a name="line.73"></a>
-<span class="sourceLineNo">074</span>    // Create a new EventCache implementation that "knows about" our<a name="line.74"></a>
-<span class="sourceLineNo">075</span>    // known objects.<a name="line.75"></a>
-<span class="sourceLineNo">076</span>    final EventQueueCollection&lt;ConfigMap&gt; eventQueues = new EventQueueCollection&lt;&gt;(configMaps, 16, 0.75f);<a name="line.76"></a>
-<span class="sourceLineNo">077</span><a name="line.77"></a>
-<span class="sourceLineNo">078</span>    // Create a consumer that can remove and process EventQueues from<a name="line.78"></a>
-<span class="sourceLineNo">079</span>    // our EventCache implementation.  It will also update our "known<a name="line.79"></a>
-<span class="sourceLineNo">080</span>    // objects".<a name="line.80"></a>
-<span class="sourceLineNo">081</span>    final Consumer&lt;? super EventQueue&lt;? extends ConfigMap&gt;&gt; siphon = (q) -&gt; {<a name="line.81"></a>
-<span class="sourceLineNo">082</span>      assertNotNull(q);<a name="line.82"></a>
-<span class="sourceLineNo">083</span>      assertFalse(q.isEmpty());<a name="line.83"></a>
-<span class="sourceLineNo">084</span>      for (final AbstractEvent&lt;? extends ConfigMap&gt; event : q) {<a name="line.84"></a>
-<span class="sourceLineNo">085</span>        assertNotNull(event);<a name="line.85"></a>
-<span class="sourceLineNo">086</span>        System.out.println("*** received event: " + event);<a name="line.86"></a>
-<span class="sourceLineNo">087</span>        final Event.Type type = event.getType();<a name="line.87"></a>
-<span class="sourceLineNo">088</span>        assertNotNull(type);<a name="line.88"></a>
-<span class="sourceLineNo">089</span>        switch (type) {<a name="line.89"></a>
-<span class="sourceLineNo">090</span>        case DELETION:<a name="line.90"></a>
-<span class="sourceLineNo">091</span>          configMaps.remove(event.getKey());<a name="line.91"></a>
-<span class="sourceLineNo">092</span>          break;<a name="line.92"></a>
-<span class="sourceLineNo">093</span>        default:<a name="line.93"></a>
-<span class="sourceLineNo">094</span>          configMaps.put(event.getKey(), event.getResource());<a name="line.94"></a>
-<span class="sourceLineNo">095</span>          break;<a name="line.95"></a>
-<span class="sourceLineNo">096</span>        }<a name="line.96"></a>
-<span class="sourceLineNo">097</span>      }<a name="line.97"></a>
-<span class="sourceLineNo">098</span>    };<a name="line.98"></a>
-<span class="sourceLineNo">099</span><a name="line.99"></a>
-<span class="sourceLineNo">100</span>    // Begin sucking EventQueue instances out of the cache on a<a name="line.100"></a>
-<span class="sourceLineNo">101</span>    // separate Thread.  Obviously there aren't any yet.  This creates<a name="line.101"></a>
-<span class="sourceLineNo">102</span>    // a new (daemon) Thread and starts it.  It will block<a name="line.102"></a>
-<span class="sourceLineNo">103</span>    // immediately, waiting for new EventQueues to show up in our<a name="line.103"></a>
-<span class="sourceLineNo">104</span>    // EventQueueCollection.<a name="line.104"></a>
-<span class="sourceLineNo">105</span>    eventQueues.start(siphon);<a name="line.105"></a>
-<span class="sourceLineNo">106</span><a name="line.106"></a>
-<span class="sourceLineNo">107</span>    // Now create a Reflector that we'll then hook up to Kubernetes<a name="line.107"></a>
-<span class="sourceLineNo">108</span>    // and instruct to "reflect" its events "into" our<a name="line.108"></a>
-<span class="sourceLineNo">109</span>    // EventQueueCollection, thus making EventQueues available to the<a name="line.109"></a>
-<span class="sourceLineNo">110</span>    // Consumer we built above.<a name="line.110"></a>
-<span class="sourceLineNo">111</span>    final Reflector&lt;ConfigMap&gt; reflector =<a name="line.111"></a>
-<span class="sourceLineNo">112</span>      new Reflector&lt;ConfigMap&gt;(client.configMaps(),<a name="line.112"></a>
-<span class="sourceLineNo">113</span>                               eventQueues,<a name="line.113"></a>
-<span class="sourceLineNo">114</span>                               executorService,<a name="line.114"></a>
-<span class="sourceLineNo">115</span>                               Duration.ofSeconds(10));<a name="line.115"></a>
-<span class="sourceLineNo">116</span><a name="line.116"></a>
-<span class="sourceLineNo">117</span>    // Start the reflection process: this effectively puts EventQueue<a name="line.117"></a>
-<span class="sourceLineNo">118</span>    // instances into the cache.  This creates a new (daemon) Thread<a name="line.118"></a>
-<span class="sourceLineNo">119</span>    // and starts it.<a name="line.119"></a>
-<span class="sourceLineNo">120</span>    reflector.start();<a name="line.120"></a>
-<span class="sourceLineNo">121</span><a name="line.121"></a>
-<span class="sourceLineNo">122</span>    // Sleep for a bit on the main thread so you can see what's going<a name="line.122"></a>
-<span class="sourceLineNo">123</span>    // on and try adding some resources to Kubernetes in a terminal<a name="line.123"></a>
-<span class="sourceLineNo">124</span>    // window.  Watch as the consumer we built above will report on<a name="line.124"></a>
-<span class="sourceLineNo">125</span>    // all the additions, updates, deletions and synchronizations.<a name="line.125"></a>
-<span class="sourceLineNo">126</span>    Thread.sleep(1L * 60L * 1000L);<a name="line.126"></a>
-<span class="sourceLineNo">127</span><a name="line.127"></a>
-<span class="sourceLineNo">128</span>    // Shut down production of events (notably before we shut down<a name="line.128"></a>
-<span class="sourceLineNo">129</span>    // consumption of events).<a name="line.129"></a>
-<span class="sourceLineNo">130</span>    reflector.close();<a name="line.130"></a>
-<span class="sourceLineNo">131</span>    client.close();<a name="line.131"></a>
-<span class="sourceLineNo">132</span><a name="line.132"></a>
-<span class="sourceLineNo">133</span>    // Shut down reception of events (notably after we shut down<a name="line.133"></a>
-<span class="sourceLineNo">134</span>    // production).<a name="line.134"></a>
-<span class="sourceLineNo">135</span>    eventQueues.close();<a name="line.135"></a>
-<span class="sourceLineNo">136</span>  }<a name="line.136"></a>
-<span class="sourceLineNo">137</span><a name="line.137"></a>
-<span class="sourceLineNo">138</span>}<a name="line.138"></a>
+<span class="sourceLineNo">069</span>    // Create a new EventCache implementation that "knows about" our<a name="line.69"></a>
+<span class="sourceLineNo">070</span>    // known objects.<a name="line.70"></a>
+<span class="sourceLineNo">071</span>    final EventQueueCollection&lt;ConfigMap&gt; eventQueues = new EventQueueCollection&lt;&gt;(configMaps, 16, 0.75f);<a name="line.71"></a>
+<span class="sourceLineNo">072</span><a name="line.72"></a>
+<span class="sourceLineNo">073</span>    // Create a consumer that can remove and process EventQueues from<a name="line.73"></a>
+<span class="sourceLineNo">074</span>    // our EventCache implementation.  It will also update our "known<a name="line.74"></a>
+<span class="sourceLineNo">075</span>    // objects" as necessary.<a name="line.75"></a>
+<span class="sourceLineNo">076</span>    final Consumer&lt;? super EventQueue&lt;? extends ConfigMap&gt;&gt; siphon =<a name="line.76"></a>
+<span class="sourceLineNo">077</span>      new ResourceTrackingEventQueueConsumer&lt;ConfigMap&gt;(configMaps) {<a name="line.77"></a>
+<span class="sourceLineNo">078</span>        @Override<a name="line.78"></a>
+<span class="sourceLineNo">079</span>        protected final void accept(final AbstractEvent&lt;? extends ConfigMap&gt; event) {<a name="line.79"></a>
+<span class="sourceLineNo">080</span>          assertNotNull(event);<a name="line.80"></a>
+<span class="sourceLineNo">081</span>          System.out.println("*** received event: " + event);<a name="line.81"></a>
+<span class="sourceLineNo">082</span>        }<a name="line.82"></a>
+<span class="sourceLineNo">083</span>      };<a name="line.83"></a>
+<span class="sourceLineNo">084</span><a name="line.84"></a>
+<span class="sourceLineNo">085</span>    // Begin sucking EventQueue instances out of the cache on a<a name="line.85"></a>
+<span class="sourceLineNo">086</span>    // separate Thread.  Obviously there aren't any yet.  This creates<a name="line.86"></a>
+<span class="sourceLineNo">087</span>    // a new (daemon) Thread and starts it.  It will block<a name="line.87"></a>
+<span class="sourceLineNo">088</span>    // immediately, waiting for new EventQueues to show up in our<a name="line.88"></a>
+<span class="sourceLineNo">089</span>    // EventQueueCollection.<a name="line.89"></a>
+<span class="sourceLineNo">090</span>    eventQueues.start(siphon);<a name="line.90"></a>
+<span class="sourceLineNo">091</span><a name="line.91"></a>
+<span class="sourceLineNo">092</span>    // Connect to Kubernetes using a combination of system properties,<a name="line.92"></a>
+<span class="sourceLineNo">093</span>    // environment variables and ~/.kube/config settings as detailed<a name="line.93"></a>
+<span class="sourceLineNo">094</span>    // here:<a name="line.94"></a>
+<span class="sourceLineNo">095</span>    // https://github.com/fabric8io/kubernetes-client/blob/v3.2.0/README.md#configuring-the-client.<a name="line.95"></a>
+<span class="sourceLineNo">096</span>    // We'll use this client when we create a Reflector below.<a name="line.96"></a>
+<span class="sourceLineNo">097</span>    final DefaultKubernetesClient client = new DefaultKubernetesClient();<a name="line.97"></a>
+<span class="sourceLineNo">098</span><a name="line.98"></a>
+<span class="sourceLineNo">099</span>    // Now create a Reflector that we'll then hook up to Kubernetes<a name="line.99"></a>
+<span class="sourceLineNo">100</span>    // and instruct to "reflect" its events "into" our<a name="line.100"></a>
+<span class="sourceLineNo">101</span>    // EventQueueCollection, thus making EventQueues available to the<a name="line.101"></a>
+<span class="sourceLineNo">102</span>    // Consumer we built above.<a name="line.102"></a>
+<span class="sourceLineNo">103</span>    final Reflector&lt;ConfigMap&gt; reflector =<a name="line.103"></a>
+<span class="sourceLineNo">104</span>      new Reflector&lt;ConfigMap&gt;(client.configMaps(),<a name="line.104"></a>
+<span class="sourceLineNo">105</span>                               eventQueues,<a name="line.105"></a>
+<span class="sourceLineNo">106</span>                               Duration.ofSeconds(10));<a name="line.106"></a>
+<span class="sourceLineNo">107</span><a name="line.107"></a>
+<span class="sourceLineNo">108</span>    // Start the reflection process: this effectively puts EventQueue<a name="line.108"></a>
+<span class="sourceLineNo">109</span>    // instances into the cache.  This creates a new (daemon) Thread<a name="line.109"></a>
+<span class="sourceLineNo">110</span>    // and starts it.<a name="line.110"></a>
+<span class="sourceLineNo">111</span>    System.out.println("*** starting reflector");<a name="line.111"></a>
+<span class="sourceLineNo">112</span>    reflector.start();<a name="line.112"></a>
+<span class="sourceLineNo">113</span><a name="line.113"></a>
+<span class="sourceLineNo">114</span>    // Sleep for a bit on the main thread so you can see what's going<a name="line.114"></a>
+<span class="sourceLineNo">115</span>    // on and try adding some resources to Kubernetes in a terminal<a name="line.115"></a>
+<span class="sourceLineNo">116</span>    // window.  Watch as the consumer we built above will report on<a name="line.116"></a>
+<span class="sourceLineNo">117</span>    // all the additions, updates, deletions and synchronizations.<a name="line.117"></a>
+<span class="sourceLineNo">118</span>    Thread.sleep(1L * 60L * 1000L);<a name="line.118"></a>
+<span class="sourceLineNo">119</span><a name="line.119"></a>
+<span class="sourceLineNo">120</span>    // Close the Reflector.  This cancels any scheduled<a name="line.120"></a>
+<span class="sourceLineNo">121</span>    // synchronization tasks.<a name="line.121"></a>
+<span class="sourceLineNo">122</span>    System.out.println("*** closing reflector");<a name="line.122"></a>
+<span class="sourceLineNo">123</span>    reflector.close();<a name="line.123"></a>
+<span class="sourceLineNo">124</span>    <a name="line.124"></a>
+<span class="sourceLineNo">125</span>    // Close the client, now that no one will be calling it anymore.<a name="line.125"></a>
+<span class="sourceLineNo">126</span>    System.out.println("*** closing client");<a name="line.126"></a>
+<span class="sourceLineNo">127</span>    client.close();<a name="line.127"></a>
+<span class="sourceLineNo">128</span><a name="line.128"></a>
+<span class="sourceLineNo">129</span>    // Shut down reception of events now that no one is making any<a name="line.129"></a>
+<span class="sourceLineNo">130</span>    // more of them.<a name="line.130"></a>
+<span class="sourceLineNo">131</span>    System.out.println("*** closing eventQueues");<a name="line.131"></a>
+<span class="sourceLineNo">132</span>    eventQueues.close();<a name="line.132"></a>
+<span class="sourceLineNo">133</span>  }<a name="line.133"></a>
+<span class="sourceLineNo">134</span><a name="line.134"></a>
+<span class="sourceLineNo">135</span>}<a name="line.135"></a>
 
 
 
