@@ -777,10 +777,8 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
 
       if (consumerExecutor != null) {
 
-        if (consumerExecutor != null) {
-          // Stop accepting new tasks.
-          consumerExecutor.shutdown();
-        }
+        // Stop accepting new tasks.
+        consumerExecutor.shutdown();
 
         // Cancel all tasks firmly (there shouldn't be any).
         consumerExecutor.shutdownNow();

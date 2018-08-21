@@ -436,6 +436,9 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * and then {@linkplain Reflector#start() starts the embedded
    * <code>Reflector</code>}.
    *
+   * @exception IOException if {@link Reflector#start()} throws an
+   * {@link IOException}
+   *
    * @see EventQueueCollection#start(Consumer)
    *
    * @see Reflector#start()

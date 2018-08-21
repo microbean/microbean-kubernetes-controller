@@ -46,6 +46,7 @@ import java.util.logging.Logger;
 
 import io.fabric8.kubernetes.client.DefaultKubernetesClient; // for javadoc only
 import io.fabric8.kubernetes.client.KubernetesClientException;
+import io.fabric8.kubernetes.client.Watch; // for javadoc only
 import io.fabric8.kubernetes.client.Watcher;
 
 import io.fabric8.kubernetes.client.dsl.base.BaseOperation;
@@ -571,9 +572,9 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * representing any scheduled synchronization task created as a
    * result of the user's having supplied a {@link Duration} at
    * construction time.  The return value may be (and often is) safely
-   * ignored.  Invoking {@link Future#cancel()} on the returned {@link
-   * Future} will result in the scheduled synchronization task being
-   * cancelled irrevocably.</p>
+   * ignored.  Invoking {@link Future#cancel(boolean)} on the returned
+   * {@link Future} will result in the scheduled synchronization task
+   * being cancelled irrevocably.</p>
    *
    * <p>This method may return {@code null}.</p>
    *
