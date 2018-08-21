@@ -16,6 +16,7 @@
  */
 package org.microbean.kubernetes.controller;
 
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -27,8 +28,6 @@ import static org.junit.Assert.assertTrue;
 
 public class TestInterruptionBehavior {
 
-  private volatile Thread taskThread;
-  
   public TestInterruptionBehavior() {
     super();
   }
@@ -36,24 +35,27 @@ public class TestInterruptionBehavior {
   @Test
   public void testInterruptionAndScheduledThreadPoolExecutorInteraction() throws Exception {
     final ScheduledThreadPoolExecutor e = new ScheduledThreadPoolExecutor(1);
-    e.scheduleWithFixedDelay(() -> {
-        this.taskThread = Thread.currentThread();
-        assertFalse(taskThread.isInterrupted());
-        while (!this.taskThread.isInterrupted()) {
+    final Future<?> task = e.scheduleWithFixedDelay(() -> {
+        assertFalse(Thread.currentThread().isInterrupted());
+        while (!Thread.currentThread().isInterrupted()) {
           try {
-            Thread.sleep(200L);
+            synchronized (TestInterruptionBehavior.this) {
+              TestInterruptionBehavior.this.wait();
+            }
+            assertFalse(Thread.currentThread().isInterrupted());
           } catch (final InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
-            assertTrue(this.taskThread.isInterrupted());
+            assertTrue(Thread.currentThread().isInterrupted());
+          } catch (final RuntimeException runtimeException) {
+            runtimeException.printStackTrace();
+            throw runtimeException;
           }
         }
-        assertTrue(this.taskThread.isInterrupted());
+        assertTrue(Thread.currentThread().isInterrupted());
       }, 0L, 1L, TimeUnit.MILLISECONDS);
-    Thread.sleep(500L);
-    this.taskThread.interrupt();
-    Thread.sleep(500L);
+    assertTrue(task.cancel(true)); // should interrupt
     e.shutdown();
-    assertFalse(e.awaitTermination(2L, TimeUnit.SECONDS));
+    assertTrue(e.awaitTermination(2L, TimeUnit.SECONDS));
     e.shutdownNow();
     assertTrue(e.awaitTermination(2L, TimeUnit.SECONDS));
   }

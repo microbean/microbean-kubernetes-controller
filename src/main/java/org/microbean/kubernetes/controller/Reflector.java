@@ -33,8 +33,10 @@ import java.util.Objects;
 import java.util.Map;
 
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import java.util.function.Function;
@@ -118,7 +120,8 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    */
   private volatile Object lastSynchronizationResourceVersion;
 
-  private final ScheduledExecutorService synchronizationExecutorService;
+  @GuardedBy("this")
+  private ScheduledExecutorService synchronizationExecutorService;
 
   private final Function<? super Throwable, Boolean> synchronizationErrorHandler;
 
@@ -297,13 +300,8 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       this.shutdownSynchronizationExecutorServiceOnClose = false;
       this.synchronizationErrorHandler = null;
     } else {
-      if (synchronizationExecutorService == null) {
-        this.synchronizationExecutorService = Executors.newScheduledThreadPool(1);
-        this.shutdownSynchronizationExecutorServiceOnClose = true;
-      } else {
-        this.synchronizationExecutorService = synchronizationExecutorService;
-        this.shutdownSynchronizationExecutorServiceOnClose = false;
-      }
+      this.synchronizationExecutorService = synchronizationExecutorService;
+      this.shutdownSynchronizationExecutorServiceOnClose = synchronizationExecutorService == null;
       if (synchronizationErrorHandler == null) {
         this.synchronizationErrorHandler = t -> {
           if (this.logger.isLoggable(Level.SEVERE)) {
@@ -315,6 +313,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         this.synchronizationErrorHandler = synchronizationErrorHandler;
       }
     }
+    
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
     }
@@ -370,6 +369,21 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     }
   }
 
+  private synchronized final void cancelSynchronization() {
+    final String cn = this.getClass().getName();
+    final String mn = "closeSynchronizationExecutorService";
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.entering(cn, mn);
+    }
+    if (this.synchronizationTask != null) {
+      this.synchronizationTask.cancel(true /* interrupt the task */);
+      this.synchronizationTask = null;
+    }
+    if (this.logger.isLoggable(Level.FINER)) {
+      this.logger.exiting(cn, mn);
+    }
+  }
+  
   private synchronized final void closeSynchronizationExecutorService() {
     final String cn = this.getClass().getName();
     final String mn = "closeSynchronizationExecutorService";
@@ -377,11 +391,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       this.logger.entering(cn, mn);
     }
 
-    // Nicely cancel our task.
-    final ScheduledFuture<?> synchronizationTask = this.synchronizationTask;
-    if (synchronizationTask != null) {
-      synchronizationTask.cancel(true /* interrupt the task */);
-    }
+    this.cancelSynchronization();
 
     if (this.synchronizationExecutorService != null && this.shutdownSynchronizationExecutorServiceOnClose) {
 
@@ -393,7 +403,9 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         if (!this.synchronizationExecutorService.awaitTermination(60L, TimeUnit.SECONDS)) {
           this.synchronizationExecutorService.shutdownNow();
           if (!this.synchronizationExecutorService.awaitTermination(60L, TimeUnit.SECONDS)) {
-            // TODO: log
+            if (this.logger.isLoggable(Level.WARNING)) {
+              this.logger.logp(Level.WARNING, cn, mn, "synchronizationExecutorService did not terminate cleanly after 60 seconds");
+            }
           }
         }
       } catch (final InterruptedException interruptedException) {
@@ -411,34 +423,51 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   /**
    * As the name implies, sets up <em>synchronization</em>, which is
    * the act of the downstream event cache telling its associated
-   * event listeners that there are items remaining to be processed.
+   * event listeners that there are items remaining to be processed,
+   * and returns a {@link Future} reprsenting the scheduled, repeating
+   * task.
    *
    * <p>This method schedules repeated invocations of the {@link
    * #synchronize()} method.</p>
+   *
+   * <p>This method may return {@code null}.</p>
+   *
+   * @return a {@link Future} representing the scheduled repeating
+   * synchronization task, or {@code null} if no such task was
+   * scheduled
    *
    * @see #synchronize()
    *
    * @see EventCache#synchronize()
    */
-  private synchronized final void setUpSynchronization() {
+  private synchronized final Future<?> setUpSynchronization() {
     final String cn = this.getClass().getName();
     final String mn = "setUpSynchronization";
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
 
-    if (this.synchronizationExecutorService != null && this.synchronizationTask == null) {
-      assert this.synchronizationIntervalInSeconds > 0L;
-
-      if (this.logger.isLoggable(Level.INFO)) {
-        this.logger.logp(Level.INFO, cn, mn, "Scheduling downstream synchronization every {0} seconds", Long.valueOf(this.synchronizationIntervalInSeconds));
+    if (this.synchronizationIntervalInSeconds > 0L) {
+      if (this.synchronizationExecutorService == null || this.synchronizationExecutorService.isTerminated()) {
+        this.synchronizationExecutorService = Executors.newScheduledThreadPool(1);
+        if (this.synchronizationExecutorService instanceof ScheduledThreadPoolExecutor) {
+          ((ScheduledThreadPoolExecutor)this.synchronizationExecutorService).setRemoveOnCancelPolicy(true);
+        }
       }
-      this.synchronizationTask = this.synchronizationExecutorService.scheduleWithFixedDelay(this::synchronize, 0L, this.synchronizationIntervalInSeconds, TimeUnit.SECONDS);
+      if (this.synchronizationTask == null) {
+        if (this.logger.isLoggable(Level.INFO)) {
+          this.logger.logp(Level.INFO, cn, mn, "Scheduling downstream synchronization every {0} seconds", Long.valueOf(this.synchronizationIntervalInSeconds));
+        }
+        this.synchronizationTask = this.synchronizationExecutorService.scheduleWithFixedDelay(this::synchronize, 0L, this.synchronizationIntervalInSeconds, TimeUnit.SECONDS);
+      }
+      assert this.synchronizationExecutorService != null;
+      assert this.synchronizationTask != null;
     }
 
     if (this.logger.isLoggable(Level.FINER)) {
-      this.logger.exiting(cn, mn);
+      this.logger.exiting(cn, mn, this.synchronizationTask);
     }
+    return this.synchronizationTask;
   }
 
   private final void synchronize() {
@@ -455,8 +484,9 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       Throwable throwable = null;
       synchronized (this.eventCache) {
         try {
-          this.eventCache.synchronize(); // only throws RuntimeException (i.e. no Exception, no InterruptedException)
+          this.eventCache.synchronize();
         } catch (final Throwable e) {
+          assert e instanceof RuntimeException || e instanceof Error;
           throwable = e;
         }
       }
@@ -466,7 +496,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         } else if (throwable instanceof Error) {
           throw (Error)throwable;
         } else {
-          assert !(throwable instanceof Exception);
+          assert !(throwable instanceof Exception) : "Signature changed for EventCache#synchronize()";
         }
       }
     }
@@ -509,13 +539,17 @@ public class Reflector<T extends HasMetadata> implements Closeable {
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
-    final boolean returnValue = this.synchronizationExecutorService != null;
+    final boolean returnValue;
+    synchronized (this) {
+      returnValue = this.synchronizationExecutorService != null;
+    }
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn, Boolean.valueOf(returnValue));
     }
     return returnValue;
   }
 
+  // Not used; not used in the Go code either?!
   private final Object getLastSynchronizationResourceVersion() {
     return this.lastSynchronizationResourceVersion;
   }
@@ -533,31 +567,62 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * EventCache#add(Object, AbstractEvent.Type, HasMetadata)} methods
    * as appropriate.
    *
+   * <p>For convenience only, this method returns a {@link Future}
+   * representing any scheduled synchronization task created as a
+   * result of the user's having supplied a {@link Duration} at
+   * construction time.  The return value may be (and often is) safely
+   * ignored.  Invoking {@link Future#cancel()} on the returned {@link
+   * Future} will result in the scheduled synchronization task being
+   * cancelled irrevocably.</p>
+   *
+   * <p>This method may return {@code null}.</p>
+   *
    * <p>The calling {@link Thread} is not blocked by invocations of
-   * this method.</p>
+   * this method.</p> 
+   *
+   * @return a {@link Future} representing a scheduled synchronization
+   * operation, or {@code null}
+   *
+   * @exception IOException if a watch has previously been established
+   * and could not be {@linkplain Watch#close() closed}
    *
    * @see #close()
    */
   @NonBlocking
-  public final void start() {
+  public final Future<?> start() throws IOException {
     final String cn = this.getClass().getName();
     final String mn = "start";
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
 
+    Future<?> returnValue = null;
     synchronized (this) {
-      if (this.watch == null) {
 
+      try {
+      
+        // If somehow we got called while a watch already exists, then
+        // close the old watch (we'll replace it).  Note that,
+        // critically, the onClose() method of our watch handler, sets
+        // this reference to null, so if the watch is in the process
+        // of being closed, this little block won't be executed.
+        if (this.watch != null) {
+          final Closeable watch = this.watch;
+          this.watch = null;
+          watch.close();
+        }
+        
         // Run a list operation, and get the resourceVersion of that list.
         @SuppressWarnings("unchecked")
         final KubernetesResourceList<? extends T> list = ((Listable<? extends KubernetesResourceList<? extends T>>)this.operation).list();
         assert list != null;
+
         final ListMeta metadata = list.getMetadata();
         assert metadata != null;
+
         final String resourceVersion = metadata.getResourceVersion();
         assert resourceVersion != null;
-
+        
         // Using the results of that list operation, do a full replace
         // on the EventCache with them.
         final Collection<? extends T> replacementItems;
@@ -570,11 +635,11 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         synchronized (eventCache) {
           this.eventCache.replace(replacementItems, resourceVersion);
         }
-
+        
         // Record the resource version we captured during our list
         // operation.
         this.setLastSynchronizationResourceVersion(resourceVersion);
-
+        
         // Now that we've vetted that our list operation works (i.e. no
         // syntax errors, no connectivity problems) we can schedule
         // synchronizations if necessary.
@@ -590,19 +655,41 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         // heartbeat).  See
         // https://engineering.bitnami.com/articles/a-deep-dive-into-kubernetes-controllers.html#resyncperiod.
         this.setUpSynchronization();
-
+        returnValue = this.synchronizationTask;
+        
         // Now that we've taken care of our list() operation, set up our
         // watch() operation.
         @SuppressWarnings("unchecked")
         final Versionable<? extends Watchable<? extends Closeable, Watcher<T>>> versionableOperation = (Versionable<? extends Watchable<? extends Closeable, Watcher<T>>>)this.operation;
         this.watch = withResourceVersion(versionableOperation, resourceVersion).watch(new WatchHandler());
 
+      } catch (final IOException | RuntimeException exception) {
+        this.cancelSynchronization();
+        if (this.watch != null) {
+          try {
+            // TODO: haven't seen it, but reason hard about deadlock
+            // here; see
+            // WatchHandler#onClose(KubernetesClientException) which
+            // *can* call start() (this method) with the monitor.  I
+            // *think* we're in the clear here:
+            // onClose(KubernetesClientException) will only (re-)call
+            // start() if the supplied KubernetesClientException is
+            // non-null.  In this case, it should be, because this is
+            // an ordinary close() call.
+            this.watch.close();
+          } catch (final IOException | RuntimeException suppressMe) {
+            exception.addSuppressed(suppressMe);
+          }
+          this.watch = null;
+        }
+        throw exception;
       }
     }
 
     if (this.logger.isLoggable(Level.FINER)) {
-      this.logger.exiting(cn, mn);
+      this.logger.exiting(cn, mn, returnValue);
     }
+    return returnValue;
   }
 
   /**
@@ -940,8 +1027,26 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       if (logger.isLoggable(Level.FINER)) {
         logger.entering(cn, mn, exception);
       }
-      if (exception != null && logger.isLoggable(Level.WARNING)) {
-        logger.logp(Level.WARNING, cn, mn, exception.getMessage(), exception);
+
+      synchronized (Reflector.this) {
+        // No need to close it; we're being called because it's
+        // closing.
+        Reflector.this.watch = null;
+      }
+      
+      if (exception != null) {
+        if (logger.isLoggable(Level.WARNING)) {
+          logger.logp(Level.WARNING, cn, mn, exception.getMessage(), exception);
+        }
+        // See
+        // https://github.com/kubernetes/client-go/blob/5f85fe426e7aa3c1df401a7ae6c1ba837bd76be9/tools/cache/reflector.go#L204.
+        try {
+          Reflector.this.start();
+        } catch (final IOException ioException) {
+          if (logger.isLoggable(Level.SEVERE)) {
+            logger.logp(Level.SEVERE, cn, mn, ioException.getMessage(), ioException);
+          }
+        }
       }
       if (logger.isLoggable(Level.FINER)) {
         logger.exiting(cn, mn, exception);

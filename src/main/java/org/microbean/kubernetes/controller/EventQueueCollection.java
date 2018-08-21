@@ -98,7 +98,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * @see #addPropertyChangeListener(String, PropertyChangeListener)
    */
   private final PropertyChangeSupport propertyChangeSupport;
-  
+
   /**
    * Whether this {@link EventQueueCollection} is in the process of
    * {@linkplain #close() closing}.
@@ -168,10 +168,11 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
   @GuardedBy("this")
   private ScheduledExecutorService consumerExecutor;
 
-  private volatile Future<?> eventQueueConsumptionTask;
+  @GuardedBy("this")
+  private Future<?> eventQueueConsumptionTask;
 
   private final Function<? super Throwable, Boolean> errorHandler;
-  
+
   /**
    * A {@link Logger} used by this {@link EventQueueCollection}.
    *
@@ -180,7 +181,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * @see #createLogger()
    */
   protected final Logger logger;
-  
+
   /*
    * Constructors.
    */
@@ -401,7 +402,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
                       // There was an object in our knownObjects map
                       // somehow, but not in one of the queues we
                       // manage.  Make sure others know about it.
-                      
+
                       // We make a SynchronizationEvent of type
                       // MODIFICATION.  shared_informer.go checks in
                       // its HandleDeltas function to see if oldObj
@@ -413,7 +414,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
                       this.synchronize(this, AbstractEvent.Type.MODIFICATION, knownObject, true /* yes, populate */);
                     }
                   }
-                  
+
                 }
               }
             }
@@ -504,14 +505,14 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     }
 
     int queuedDeletions = 0;
-    
+
     final Map<?, ? extends T> knownObjects = this.getKnownObjects();
     if (knownObjects == null) {
 
       for (final EventQueue<T> eventQueue : this.map.values()) {
         assert eventQueue != null;
         final Object key;
-        final AbstractEvent<? extends T> newestEvent;        
+        final AbstractEvent<? extends T> newestEvent;
         synchronized (eventQueue) {
           if (eventQueue.isEmpty()) {
             newestEvent = null;
@@ -561,7 +562,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
           this.add(event, false /* don't treat this as a population event */);
         }
       }
-      
+
     } else {
 
       synchronized (knownObjects) {
@@ -585,9 +586,9 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
           }
         }
       }
-      
+
     }
-      
+
     if (!this.populated) {
       this.populated = true;
       this.firePropertyChange("populated", false, true);
@@ -706,22 +707,22 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn, siphon);
     }
-    
+
     Objects.requireNonNull(siphon);
 
     final Future<?> returnValue;
     synchronized (this) {
       if (this.consumerExecutor == null) {
         this.consumerExecutor = this.createScheduledThreadPoolExecutor();
-        if (this.consumerExecutor == null) {
-          throw new IllegalStateException();
-        }
+        assert this.consumerExecutor != null : "createScheduledThreadPoolExecutor() == null";
+      }
+      if (this.eventQueueConsumptionTask == null) {
         this.eventQueueConsumptionTask = this.consumerExecutor.scheduleWithFixedDelay(this.createEventQueueConsumptionTask(siphon), 0L, 1L, TimeUnit.SECONDS);
       }
       assert this.eventQueueConsumptionTask != null;
       returnValue = this.eventQueueConsumptionTask;
     }
-    
+
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn, returnValue);
     }
@@ -756,35 +757,51 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       this.logger.entering(cn, mn);
     }
 
-    final ExecutorService consumerExecutor;
-    final Future<?> task;
-    synchronized (this) {
-      this.closing = true;
-      task = this.eventQueueConsumptionTask;
-      consumerExecutor = this.consumerExecutor;
-    }
+    // (closing is a volatile field.)
+    this.closing = true;
 
-    if (consumerExecutor != null) {
-      // Stop accepting new tasks.
-      consumerExecutor.shutdown();
+    try {
 
-      if (task != null) {
-        task.cancel(true);
-      }
-      
-      // Cancel all tasks firmly.
-      consumerExecutor.shutdownNow();
-      
-      try {
-        // Wait for termination to complete normally.
-        if (!consumerExecutor.awaitTermination(60, TimeUnit.SECONDS) && this.logger.isLoggable(Level.WARNING)) {
-          this.logger.logp(Level.WARNING, cn, mn, "consumerExecutor.awaitTermination() failed");
+      final ScheduledExecutorService consumerExecutor;
+      synchronized (this) {
+        // We keep this synchronized block as small as we can.  Note
+        // that in other areas in the code there are threads holding
+        // this object's monitor.
+        consumerExecutor = this.consumerExecutor;
+        this.consumerExecutor = null;
+        if (this.eventQueueConsumptionTask != null) {
+          this.eventQueueConsumptionTask.cancel(true);
+          this.eventQueueConsumptionTask = null;
         }
-      } catch (final InterruptedException interruptedException) {
-        consumerExecutor.shutdownNow();
-        Thread.currentThread().interrupt();
       }
+
+      if (consumerExecutor != null) {
+
+        if (consumerExecutor != null) {
+          // Stop accepting new tasks.
+          consumerExecutor.shutdown();
+        }
+
+        // Cancel all tasks firmly (there shouldn't be any).
+        consumerExecutor.shutdownNow();
+
+        try {
+          // Wait for termination to complete normally.  This SHOULD
+          // complete instantly.
+          if (!consumerExecutor.awaitTermination(60, TimeUnit.SECONDS) && this.logger.isLoggable(Level.WARNING)) {
+            this.logger.logp(Level.WARNING, cn, mn, "this.consumerExecutor.awaitTermination() failed");
+          }
+        } catch (final InterruptedException interruptedException) {
+          Thread.currentThread().interrupt();
+        }
+      }
+
+    } finally {
+      this.closing = false;
     }
+
+    assert this.eventQueueConsumptionTask == null;
+    assert this.consumerExecutor == null;
 
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
@@ -794,30 +811,37 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
   private final Runnable createEventQueueConsumptionTask(final Consumer<? super EventQueue<? extends T>> siphon) {
     Objects.requireNonNull(siphon);
     final Runnable returnValue = () -> {
-      while (!Thread.currentThread().isInterrupted()) {
-        @Blocking
-        final EventQueue<T> eventQueue = this.get();
-        if (eventQueue != null) {
-          Throwable unhandledThrowable = null;
-          synchronized (eventQueue) {
-            try {
-              siphon.accept(eventQueue);
-            } catch (final TransientException transientException) {              
-              this.map.putIfAbsent(eventQueue.getKey(), eventQueue);
-            } catch (final Throwable e) {
-              unhandledThrowable = e;
+      try {
+        while (!Thread.currentThread().isInterrupted()) {
+          @Blocking
+          final EventQueue<T> eventQueue = this.get();
+          if (eventQueue != null) {
+            Throwable unhandledThrowable = null;
+            synchronized (eventQueue) {
+              try {
+                siphon.accept(eventQueue);
+              } catch (final TransientException transientException) {
+                this.map.putIfAbsent(eventQueue.getKey(), eventQueue);
+              } catch (final Throwable e) {
+                unhandledThrowable = e;
+              }
             }
-          }
-          if (unhandledThrowable != null && !this.errorHandler.apply(unhandledThrowable)) {
-            if (unhandledThrowable instanceof RuntimeException) {
-              throw (RuntimeException)unhandledThrowable;
-            } else if (unhandledThrowable instanceof Error) {
-              throw (Error)unhandledThrowable;
-            } else {
-              assert !(unhandledThrowable instanceof Exception);
+            if (unhandledThrowable != null && !this.errorHandler.apply(unhandledThrowable)) {
+              if (unhandledThrowable instanceof RuntimeException) {
+                throw (RuntimeException)unhandledThrowable;
+              } else if (unhandledThrowable instanceof Error) {
+                throw (Error)unhandledThrowable;
+              } else {
+                assert !(unhandledThrowable instanceof Exception);
+              }
             }
           }
         }
+      } catch (final RuntimeException throwMe) {
+        if (logger.isLoggable(Level.SEVERE)) {
+          logger.logp(Level.SEVERE, this.getClass().getName(), "<eventQueueConsumptionTask>", throwMe.getMessage(), throwMe);
+        }
+        throw throwMe;
       }
     };
     return returnValue;
@@ -851,13 +875,13 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       Thread.currentThread().interrupt();
       returnValue = null;
     }
-    
+
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn, returnValue);
     }
     return returnValue;
   }
-  
+
   @Blocking
   private final EventQueue<T> take() throws InterruptedException {
     final String cn = this.getClass().getName();
@@ -895,7 +919,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         this.firePropertyChange("empty", false, this.isEmpty());
       }
     }
-    
+
     if (this.logger.isLoggable(Level.FINER)) {
       final String eventQueueString;
       synchronized (returnValue) {
@@ -992,7 +1016,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     }
     return returnValue;
   }
-  
+
   /**
    * Adds a new {@link Event} constructed out of the parameters
    * supplied to this method to this {@link EventQueueCollection} and
@@ -1070,7 +1094,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn, new Object[] { source, eventType, resource, Boolean.valueOf(populate)});
     }
-    
+
     final Event<T> event = this.createEvent(source, eventType, resource);
     if (event == null) {
       throw new IllegalStateException("createEvent() == null");
@@ -1123,16 +1147,16 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     if (this.closing) {
       throw new IllegalStateException();
     }
-    
+
     Objects.requireNonNull(event);
 
     final Object key = event.getKey();
     if (key == null) {
       throw new IllegalArgumentException("event.getKey() == null");
     }
-    
+
     E returnValue = null;
-    
+
     synchronized (this) {
 
       if (populate) {
@@ -1140,7 +1164,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         this.populated = true;
         this.firePropertyChange("populated", old, true);
       }
-      
+
       EventQueue<T> eventQueue = this.map.get(key);
       final boolean eventQueueExisted = eventQueue != null;
       if (!eventQueueExisted) {
@@ -1183,12 +1207,12 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         // store it.
         final boolean old = this.isEmpty();
         this.map.put(key, eventQueue);
-        this.firePropertyChange("empty", old, this.isEmpty());        
+        this.firePropertyChange("empty", old, this.isEmpty());
         // Notify anyone blocked on our empty state that we're no
         // longer empty
         this.notifyAll();
       }
-      
+
     }
 
     if (this.logger.isLoggable(Level.FINER)) {
@@ -1197,7 +1221,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     return returnValue;
   }
 
-  
+
   /*
    * PropertyChangeListener support.
    */
@@ -1409,12 +1433,12 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       this.logger.exiting(cn, mn);
     }
   }
-  
+
 
   /*
    * Inner and nested classes.
    */
-  
+
 
   /**
    * A {@link RuntimeException} indicating that a {@link Consumer}
@@ -1488,7 +1512,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     public TransientException(final String message, final Throwable cause) {
       super(message, cause);
     }
-    
+
   }
 
 }

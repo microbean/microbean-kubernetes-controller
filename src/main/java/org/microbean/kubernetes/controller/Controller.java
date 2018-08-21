@@ -441,7 +441,7 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * @see Reflector#start()
    */
   @NonBlocking
-  public final void start() {
+  public final void start() throws IOException {
     final String cn = this.getClass().getName();
     final String mn = "start";
     if (this.logger.isLoggable(Level.FINER)) {
@@ -457,20 +457,22 @@ public class Controller<T extends HasMetadata> implements Closeable {
     }
     try {
       this.reflector.start();
-    } catch (final RuntimeException runtimeException) {
-      try {        
+    } catch (final IOException | RuntimeException exception) {
+      try {
+        // TODO: this is problematic, I think; reflector.close() means
+        // that (potentially) it will never be able to restart it.
         this.reflector.close();
-      } catch (final IOException suppressMe) {
-        runtimeException.addSuppressed(suppressMe);
+      } catch (final IOException | RuntimeException suppressMe) {
+        exception.addSuppressed(suppressMe);
       }
       siphonTask.cancel(true);
       assert siphonTask.isDone();
       try {
         this.eventQueueCollection.close();
       } catch (final RuntimeException suppressMe) {
-        runtimeException.addSuppressed(suppressMe);
+        exception.addSuppressed(suppressMe);
       }
-      throw runtimeException;
+      throw exception;
     }
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);

@@ -108,6 +108,7 @@ public class TestReflectorBasics {
     // Start the reflection process: this effectively puts EventQueue
     // instances into the cache.  This creates a new (daemon) Thread
     // and starts it.
+    System.out.println("*** starting reflector");
     reflector.start();
 
     // Sleep for a bit on the main thread so you can see what's going
@@ -118,13 +119,16 @@ public class TestReflectorBasics {
 
     // Close the Reflector.  This cancels any scheduled
     // synchronization tasks.
+    System.out.println("*** closing reflector");
     reflector.close();
     
     // Close the client, now that no one will be calling it anymore.
+    System.out.println("*** closing client");
     client.close();
 
     // Shut down reception of events now that no one is making any
     // more of them.
+    System.out.println("*** closing eventQueues");
     eventQueues.close();
   }
 
