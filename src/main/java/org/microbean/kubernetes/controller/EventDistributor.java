@@ -78,6 +78,8 @@ import net.jcip.annotations.ThreadSafe;
  * @see #addConsumer(Consumer)
  *
  * @see #removeConsumer(Consumer)
+ *
+ * @see ResourceTrackingEventQueueConsumer#accept(AbstractEvent)
  */
 @Immutable
 @ThreadSafe
@@ -87,7 +89,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
   /*
    * Instance fields.
    */
-  
+
 
   @GuardedBy("readLock && writeLock")
   private final Collection<Pump<T>> distributors;
@@ -141,7 +143,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     final ReadWriteLock lock = new ReentrantReadWriteLock();
     this.readLock = lock.readLock();
     this.writeLock = lock.writeLock();
-    this.distributors = new ArrayList<>();    
+    this.distributors = new ArrayList<>();
     this.synchronizingDistributors = new ArrayList<>();
     this.synchronizationInterval = synchronizationInterval;
   }
@@ -150,7 +152,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
   /*
    * Instance methods.
    */
-  
+
 
   /**
    * Adds the supplied {@link Consumer} to this {@link
@@ -164,17 +166,38 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
    * @param consumer a {@link Consumer} of {@link AbstractEvent}s; may
    * be {@code null} in which case no action will be taken
    *
+   * @see #addConsumer(Consumer, Function)
+   *
    * @see #removeConsumer(Consumer)
    */
   public final void addConsumer(final Consumer<? super AbstractEvent<? extends T>> consumer) {
     this.addConsumer(consumer, null);
   }
 
+  /**
+   * Adds the supplied {@link Consumer} to this {@link
+   * EventDistributor} as a listener that will be notified of each
+   * {@link AbstractEvent} this {@link EventDistributor} receives.
+   *
+   * <p>The supplied {@link Consumer}'s {@link
+   * Consumer#accept(Object)} method may be called later on a separate
+   * thread of execution.</p>
+   *
+   * @param consumer a {@link Consumer} of {@link AbstractEvent}s; may
+   * be {@code null} in which case no action will be taken
+   *
+   * @param errorHandler a {@link Function} to handle any {@link
+   * Throwable}s encountered; may be {@code null} in which case a
+   * default error handler will be used instead
+   *
+   * @see #removeConsumer(Consumer)
+   */
   public final void addConsumer(final Consumer<? super AbstractEvent<? extends T>> consumer, final Function<? super Throwable, Boolean> errorHandler) {
     if (consumer != null) {
       this.writeLock.lock();
       try {
         final Pump<T> distributor = new Pump<>(this.synchronizationInterval, consumer, errorHandler);
+        distributor.start();
         this.distributors.add(distributor);
         this.synchronizingDistributors.add(distributor);
       } finally {
@@ -202,6 +225,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
         while (iterator.hasNext()) {
           final Pump<?> distributor = iterator.next();
           if (distributor != null && consumer.equals(distributor.getEventConsumer())) {
+            distributor.close();
             iterator.remove();
             break;
           }
@@ -220,7 +244,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
   public final void close() {
     this.writeLock.lock();
     try {
-      this.distributors.parallelStream()
+      this.distributors.stream()
         .forEach(distributor -> {
             distributor.close();
           });
@@ -254,7 +278,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     try {
       this.synchronizingDistributors.clear();
       final Instant now = Instant.now();
-      this.distributors.parallelStream()
+      this.distributors.stream()
         .filter(distributor -> distributor.shouldSynchronize(now))
         .forEach(distributor -> {
             this.synchronizingDistributors.add(distributor);
@@ -277,6 +301,8 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
    * null} in which case no action is taken
    *
    * @see #addConsumer(Consumer)
+   *
+   * @see ResourceTrackingEventQueueConsumer#accept(AbstractEvent)
    */
   @Override
   protected final void accept(final AbstractEvent<? extends T> event) {
@@ -295,7 +321,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     this.readLock.lock();
     try {
       if (!this.synchronizingDistributors.isEmpty()) {
-        this.synchronizingDistributors.parallelStream()
+        this.synchronizingDistributors.stream()
           .forEach(distributor -> distributor.accept(event));
       }
     } finally {
@@ -307,7 +333,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     this.readLock.lock();
     try {
       if (!this.distributors.isEmpty()) {
-        this.distributors.parallelStream()
+        this.distributors.stream()
           .forEach(distributor -> distributor.accept(event));
       }
     } finally {
@@ -319,7 +345,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
   /*
    * Inner and nested classes.
    */
-  
+
 
   /**
    * A {@link Consumer} of {@link AbstractEvent} instances that puts
@@ -333,27 +359,31 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
   private static final class Pump<T extends HasMetadata> implements Consumer<AbstractEvent<? extends T>>, AutoCloseable {
 
     private final Logger logger;
-    
-    private volatile boolean closing;
-    
-    private volatile Instant nextSynchronizationInstant;
-    
-    private volatile Duration synchronizationInterval;
-    
-    final BlockingQueue<AbstractEvent<? extends T>> queue;
-    
-    private final ScheduledExecutorService executor;
 
-    private final Future<?> task;
+    private final Consumer<? super AbstractEvent<? extends T>> eventConsumer;
+
+    private final Function<? super Throwable, Boolean> errorHandler;
+
+    private volatile boolean closing;
+
+    private volatile Instant nextSynchronizationInstant;
+
+    private volatile Duration synchronizationInterval;
+
+    @GuardedBy("this")
+    private ScheduledExecutorService executor;
+
+    @GuardedBy("this")
+    private Future<?> task;
 
     private volatile Future<?> errorHandlingTask;
-    
-    private final Consumer<? super AbstractEvent<? extends T>> eventConsumer;
+
+    final BlockingQueue<AbstractEvent<? extends T>> queue;
 
     private Pump(final Duration synchronizationInterval, final Consumer<? super AbstractEvent<? extends T>> eventConsumer) {
       this(synchronizationInterval, eventConsumer, null);
     }
-    
+
     private Pump(final Duration synchronizationInterval, final Consumer<? super AbstractEvent<? extends T>> eventConsumer, final Function<? super Throwable, Boolean> errorHandler) {
       super();
       final String cn = this.getClass().getName();
@@ -363,106 +393,137 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
       if (this.logger.isLoggable(Level.FINER)) {
         this.logger.entering(cn, mn, new Object[] { synchronizationInterval, eventConsumer, errorHandler });
       }
-      Objects.requireNonNull(eventConsumer);
-      this.eventConsumer = eventConsumer;
-      this.executor = this.createScheduledThreadPoolExecutor();
-      if (this.executor == null) {
-        throw new IllegalStateException("createScheduledThreadPoolExecutor() == null");
-      }
-      this.queue = new LinkedBlockingQueue<>();      
-      final Function<? super Throwable, Boolean> finalErrorHandler;
+
+      this.queue = new LinkedBlockingQueue<>();
+      this.eventConsumer = Objects.requireNonNull(eventConsumer);
       if (errorHandler == null) {
-        finalErrorHandler = t -> {
+        this.errorHandler = t -> {
           if (this.logger.isLoggable(Level.SEVERE)) {
             this.logger.logp(Level.SEVERE, this.getClass().getName(), "<pumpTask>", t.getMessage(), t);
           }
           return true;
         };
       } else {
-        finalErrorHandler = errorHandler;
+        this.errorHandler = errorHandler;
       }
-
-      // Schedule a hopefully never-ending task to pump events from
-      // our queue to the supplied eventConsumer.  We *schedule* this,
-      // even though it will never end, instead of simply *executing*
-      // it, so that if for any reason it exits (by definition an
-      // error case) it will get restarted.  Cancelling a scheduled
-      // task will also cancel all resubmissions of it, so this is the
-      // most robust thing to do.  The delay of one second is
-      // arbitrary.
-      this.task = this.executor.scheduleWithFixedDelay(() -> {
-          while (!Thread.currentThread().isInterrupted()) {
-            try {
-              this.eventConsumer.accept(this.queue.take());
-            } catch (final InterruptedException interruptedException) {
-              Thread.currentThread().interrupt();
-            } catch (final RuntimeException runtimeException) {
-              if (!finalErrorHandler.apply(runtimeException)) {
-                throw runtimeException;
-              }
-            } catch (final Error error) {
-              if (!finalErrorHandler.apply(error)) {
-                throw error;
-              }
-            }
-          }
-        }, 0L, 1L, TimeUnit.SECONDS);
-      assert this.task != null;
-      this.errorHandlingTask = this.executor.submit(() -> {
-          try {
-            while (!Thread.currentThread().isInterrupted()) {
-              this.task.get();
-            }
-          } catch (final CancellationException ok) {
-            this.task.cancel(true);
-          } catch (final ExecutionException executionException) {
-            // Although we got an ExecutionException, the task is
-            // still in a non-cancelled state.  We need to cancel it
-            // now to (potentially) have it removed from the executor
-            // queue.
-            this.task.cancel(true);
-            final Future<?> errorHandlingTask = this.errorHandlingTask;
-            if (errorHandlingTask != null) {
-              errorHandlingTask.cancel(true); // cancel ourselves, too!
-            }
-            finalErrorHandler.apply(executionException.getCause());
-          } catch (final InterruptedException interruptedException) {
-            this.task.cancel(true);
-            final Future<?> errorHandlingTask = this.errorHandlingTask;
-            if (errorHandlingTask != null) {
-              errorHandlingTask.cancel(true); // cancel ourselves, too!
-            }
-            Thread.currentThread().interrupt();
-          }
-        });
-      
       this.setSynchronizationInterval(synchronizationInterval);
+
       if (this.logger.isLoggable(Level.FINER)) {
         this.logger.exiting(cn, mn);
       }
     }
 
-    private final ScheduledExecutorService createScheduledThreadPoolExecutor() {
+    private final void start() {
       final String cn = this.getClass().getName();
-      final String mn = "createScheduledThreadPoolExecutor";
+      final String mn = "start";
       if (this.logger.isLoggable(Level.FINER)) {
         this.logger.entering(cn, mn);
       }
+
+      synchronized (this) {
+
+        if (this.executor == null) {
+          assert this.task == null;
+          assert this.errorHandlingTask == null;
+
+          this.executor = this.createScheduledThreadPoolExecutor();
+          if (this.executor == null) {
+            throw new IllegalStateException("createScheduledThreadPoolExecutor() == null");
+          }
+
+          // Schedule a hopefully never-ending task to pump events from
+          // our queue to the supplied eventConsumer.  We *schedule* this,
+          // even though it will never end, instead of simply *executing*
+          // it, so that if for any reason it exits (by definition an
+          // error case) it will get restarted.  Cancelling a scheduled
+          // task will also cancel all resubmissions of it, so this is the
+          // most robust thing to do.  The delay of one second is
+          // arbitrary.
+          this.task = this.executor.scheduleWithFixedDelay(() -> {
+              while (!Thread.currentThread().isInterrupted()) {
+                try {
+                  this.getEventConsumer().accept(this.queue.take());
+                } catch (final InterruptedException interruptedException) {
+                  Thread.currentThread().interrupt();
+                } catch (final RuntimeException runtimeException) {
+                  if (!this.errorHandler.apply(runtimeException)) {
+                    throw runtimeException;
+                  }
+                } catch (final Error error) {
+                  if (!this.errorHandler.apply(error)) {
+                    throw error;
+                  }
+                }
+              }
+            }, 0L, 1L, TimeUnit.SECONDS);
+          assert this.task != null;
+
+          this.errorHandlingTask = this.executor.submit(() -> {
+              try {
+                while (!Thread.currentThread().isInterrupted()) {
+                  // The task is basically never-ending, so this will
+                  // block too, unless there's an exception.  That's
+                  // the whole point.
+                  this.task.get();
+                }
+              } catch (final CancellationException ok) {
+                // The task was cancelled.  Possibly redundantly,
+                // cancel it for sure.  This is an expected and normal
+                // condition.
+                this.task.cancel(true);
+              } catch (final ExecutionException executionException) {
+                // The task encountered an exception while executing.
+                // Although we got an ExecutionException, the task is
+                // still in a non-cancelled state.  We need to cancel
+                // it now to (potentially) have it removed from the
+                // executor queue.
+                this.task.cancel(true);
+                final Future<?> errorHandlingTask = this.errorHandlingTask;
+                if (errorHandlingTask != null) {
+                  errorHandlingTask.cancel(true); // cancel ourselves, too!
+                }
+                // Apply the actual error-handling logic to the
+                // exception.
+                // TODO: This should have already been done by the
+                // task itself...
+                this.errorHandler.apply(executionException.getCause());
+              } catch (final InterruptedException interruptedException) {
+                Thread.currentThread().interrupt();
+              }
+              if (Thread.currentThread().isInterrupted()) {
+                // The current thread was interrupted, probably
+                // because everything is closing up shop.  Cancel
+                // everything and go home.
+                this.task.cancel(true);
+                final Future<?> errorHandlingTask = this.errorHandlingTask;
+                if (errorHandlingTask != null) {
+                  errorHandlingTask.cancel(true); // cancel ourselves, too!
+                }
+              }              
+            });
+        }
+
+      }
+
+      if (this.logger.isLoggable(Level.FINER)) {
+        this.logger.entering(cn, mn);
+      }
+    }
+
+    private final ScheduledExecutorService createScheduledThreadPoolExecutor() {
       final ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(2, new PumpThreadFactory());
       executor.setRemoveOnCancelPolicy(true);
-      if (this.logger.isLoggable(Level.FINER)) {
-        this.logger.exiting(cn, mn, executor);
-      }
       return executor;
     }
-    
+
     private final Consumer<? super AbstractEvent<? extends T>> getEventConsumer() {
       return this.eventConsumer;
     }
-    
+
     /**
      * Adds the supplied {@link AbstractEvent} to an internal {@link
-     * BlockingQueue} and schedules a task to consume it.
+     * BlockingQueue}.  A task will have already been scheduled to
+     * consume it.
      *
      * @param event the {@link AbstractEvent} to add; may be {@code
      * null} in which case no action is taken
@@ -485,7 +546,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
         this.logger.exiting(cn, mn);
       }
     }
-    
+
     @Override
     public final void close() {
       final String cn = this.getClass().getName();
@@ -493,57 +554,88 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
       if (this.logger.isLoggable(Level.FINER)) {
         this.logger.entering(cn, mn);
       }
-      this.closing = true;
-      this.executor.shutdown();
-      this.task.cancel(true);
-      this.errorHandlingTask.cancel(true);
-      try {
-        if (!this.executor.awaitTermination(60, TimeUnit.SECONDS)) {
-          this.executor.shutdownNow();
-          if (!this.executor.awaitTermination(60, TimeUnit.SECONDS)) {
-            // TODO: log
+
+      synchronized (this) {
+        if (!this.closing) {
+          try {
+            assert this.executor != null;
+            assert this.task != null;
+            assert this.errorHandlingTask != null;
+            this.closing = true;
+            
+            // Stop accepting new tasks.
+            this.executor.shutdown();
+            
+            // Cancel our regular task.
+            this.task.cancel(true);
+            this.task = null;
+            
+            // Cancel our task that surfaces errors from the regular task.
+            this.errorHandlingTask.cancel(true);
+            this.errorHandlingTask = null;
+            
+            try {
+              // Wait for our executor to shut down normally, and shut
+              // it down forcibly if it doesn't.
+              if (!this.executor.awaitTermination(60, TimeUnit.SECONDS)) {
+                this.executor.shutdownNow();
+                if (!this.executor.awaitTermination(60, TimeUnit.SECONDS)) {
+                  if (this.logger.isLoggable(Level.WARNING)) {
+                    this.logger.logp(Level.WARNING, cn, mn, "this.executor.awaitTermination() failed");
+                  }
+                }
+              }
+            } catch (final InterruptedException interruptedException) {
+              this.executor.shutdownNow();
+              Thread.currentThread().interrupt();
+            }
+            this.executor = null;
+          } finally {
+            this.closing = false;
           }
         }
-      } catch (final InterruptedException interruptedException) {
-        this.executor.shutdownNow();
-        Thread.currentThread().interrupt();
       }
+
       if (this.logger.isLoggable(Level.FINER)) {
         this.logger.exiting(cn, mn);
       }
     }
-    
-    
+
+
     /*
      * Synchronization-related methods.  It seems odd that one of these
      * listeners would need to report details about synchronization, but
      * that's what the Go code does.  Maybe this functionality could be
      * relocated "higher up".
      */
-    
-    
-    private final boolean shouldSynchronize(Instant now) {
+
+
+    private final boolean shouldSynchronize(final Instant now) {
       final String cn = this.getClass().getName();
       final String mn = "shouldSynchronize";
       if (this.logger.isLoggable(Level.FINER)) {
         this.logger.entering(cn, mn, now);
       }
-      final Duration interval = this.getSynchronizationInterval();
       final boolean returnValue;
-      if (interval == null || interval.isZero()) {
+      if (this.closing) {
         returnValue = false;
-      } else if (now == null) {
-        returnValue = Instant.now().compareTo(this.nextSynchronizationInstant) >= 0;
       } else {
-        returnValue = now.compareTo(this.nextSynchronizationInstant) >= 0;
+        final Duration interval = this.getSynchronizationInterval();
+        if (interval == null || interval.isZero()) {
+          returnValue = false;
+        } else if (now == null) {
+          returnValue = Instant.now().compareTo(this.nextSynchronizationInstant) >= 0;
+        } else {
+          returnValue = now.compareTo(this.nextSynchronizationInstant) >= 0;
+        }
       }
       if (this.logger.isLoggable(Level.FINER)) {
         this.logger.exiting(cn, mn, Boolean.valueOf(returnValue));
       }
       return returnValue;
     }
-    
-    private final void determineNextSynchronizationInterval(Instant now) {
+
+    private final void determineNextSynchronizationInterval(final Instant now) {
       final String cn = this.getClass().getName();
       final String mn = "determineNextSynchronizationInterval";
       if (this.logger.isLoggable(Level.FINER)) {
@@ -565,17 +657,30 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
         this.logger.entering(cn, mn);
       }
     }
-    
+
     public final void setSynchronizationInterval(final Duration synchronizationInterval) {
       this.synchronizationInterval = synchronizationInterval;
     }
-    
+
     public final Duration getSynchronizationInterval() {
       return this.synchronizationInterval;
     }
+
+
+    /*
+     * Inner and nested classes.
+     */
     
+    
+    /**
+     * A {@link ThreadFactory} that {@linkplain #newThread(Runnable)
+     * produces new <code>Thread</code>s} with sane names.
+     *
+     * @author <a href="https://about.me/lairdnelson"
+     * target="_parent">Laird Nelson</a>
+     */
     private static final class PumpThreadFactory implements ThreadFactory {
-      
+
       private final ThreadGroup group;
 
       private final AtomicInteger threadNumber = new AtomicInteger(1);
@@ -601,7 +706,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
         return returnValue;
       }
     }
-    
+
   }
-  
+
 }

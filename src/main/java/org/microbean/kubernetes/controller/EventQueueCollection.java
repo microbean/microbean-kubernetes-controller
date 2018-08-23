@@ -411,7 +411,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
                       // oldObj exists, therefore this is a
                       // SynchronizationEvent of type MODIFICATION,
                       // not ADDITION.
-                      this.synchronize(this, AbstractEvent.Type.MODIFICATION, knownObject, true /* yes, populate */);
+                      this.addSynchronizationEvent(this, AbstractEvent.Type.MODIFICATION, knownObject);
                     }
                   }
 
@@ -482,6 +482,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     final int size;
     final Set<Object> replacementKeys;
 
+    // Process all the additions first.
     if (incomingResources == null) {
       size = 0;
       replacementKeys = Collections.emptySet();
@@ -497,46 +498,63 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
           for (final T resource : incomingResources) {
             if (resource != null) {
               replacementKeys.add(this.getKey(resource));
-              this.synchronize(this, AbstractEvent.Type.ADDITION, resource, false);
+              // The final boolean parameter indicates that we don't
+              // want our populated status to be set by this call.  We
+              // do this at the bottom of this method ourselves.
+              this.addSynchronizationEvent(this, AbstractEvent.Type.ADDITION, resource, false);
             }
           }
         }
       }
     }
 
+    // Now process deletions.
+
     int queuedDeletions = 0;
 
     final Map<?, ? extends T> knownObjects = this.getKnownObjects();
     if (knownObjects == null) {
 
+      // No one is keeping track of known objects.  The best we can do
+      // is: if there's an EventQueue currently being processed, then
+      // if we get here the object it concerns itself with in
+      // Kubernetes is gone.  We need to synthesize a deletion event
+      // to say, effectively, "The object was deleted but we don't
+      // know what its prior state was".
+
       for (final EventQueue<T> eventQueue : this.map.values()) {
         assert eventQueue != null;
+
         final Object key;
         final AbstractEvent<? extends T> newestEvent;
         synchronized (eventQueue) {
+
           if (eventQueue.isEmpty()) {
-            newestEvent = null;
             key = null;
-            assert false : "eventQueue.isEmpty(): " + eventQueue;
-          } else {
-            key = eventQueue.getKey();
-            if (key == null) {
-              throw new IllegalStateException();
-            }
-            if (replacementKeys.contains(key)) {
-              newestEvent = null;
-            } else {
-              // We have an EventQueue indexed under a key that
-              // identifies a resource that no longer exists in
-              // Kubernetes.  Inform any consumers via a deletion
-              // event that this object was removed at some point from
-              // Kubernetes.  The state of the object in question is
-              // indeterminate.
-              newestEvent = eventQueue.getLast();
-              assert newestEvent != null;
-            }
+            newestEvent = null;
+            throw new IllegalStateException("eventQueue.isEmpty(): " + eventQueue);
           }
+
+          key = eventQueue.getKey();
+          if (key == null) {
+            throw new IllegalStateException();
+          }
+
+          if (replacementKeys.contains(key)) {
+            newestEvent = null;
+          } else {
+            // We have an EventQueue indexed under a key that
+            // identifies a resource that no longer exists in
+            // Kubernetes.  Inform any consumers via a deletion event
+            // that this object was removed at some point from
+            // Kubernetes.  The state of the object in question is
+            // indeterminate.
+            newestEvent = eventQueue.getLast();
+            assert newestEvent != null;
+          }
+
         }
+
         if (newestEvent != null) {
           assert key != null;
           // We grab the last event in the queue in question and get
@@ -559,13 +577,21 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
             throw new IllegalStateException("createEvent() == null");
           }
           event.setKey(key);
-          this.add(event, false /* don't treat this as a population event */);
+          // The final boolean parameter indicates that we don't want
+          // our populated status to be set by this call.  We do this
+          // at the bottom of this method ourselves.
+          this.add(event, false);
         }
       }
 
     } else {
+      assert knownObjects != null;
+
+      // We're keeping track of known objects, so fire deletion events
+      // if objects were removed from Kubernetes.
 
       synchronized (knownObjects) {
+
         if (!knownObjects.isEmpty()) {
           final Collection<? extends Entry<?, ? extends T>> entrySet = knownObjects.entrySet();
           if (entrySet != null && !entrySet.isEmpty()) {
@@ -578,13 +604,18 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
                     throw new IllegalStateException("createEvent() == null");
                   }
                   event.setKey(knownKey);
-                  this.add(event, false /* don't treat this as a population event */);
+                  // The final boolean parameter indicates that we
+                  // don't want our populated status to be set by this
+                  // call.  We do this at the bottom of this method
+                  // ourselves.
+                  this.add(event, false);
                   queuedDeletions++;
                 }
               }
             }
           }
         }
+
       }
 
     }
@@ -711,13 +742,19 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     Objects.requireNonNull(siphon);
 
     final Future<?> returnValue;
+
     synchronized (this) {
       if (this.consumerExecutor == null) {
         this.consumerExecutor = this.createScheduledThreadPoolExecutor();
         assert this.consumerExecutor != null : "createScheduledThreadPoolExecutor() == null";
       }
+
       if (this.eventQueueConsumptionTask == null) {
-        this.eventQueueConsumptionTask = this.consumerExecutor.scheduleWithFixedDelay(this.createEventQueueConsumptionTask(siphon), 0L, 1L, TimeUnit.SECONDS);
+        this.eventQueueConsumptionTask =
+          this.consumerExecutor.scheduleWithFixedDelay(this.createEventQueueConsumptionTask(siphon),
+                                                       0L,
+                                                       1L,
+                                                       TimeUnit.SECONDS);
       }
       assert this.eventQueueConsumptionTask != null;
       returnValue = this.eventQueueConsumptionTask;
@@ -764,15 +801,18 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
 
       final ScheduledExecutorService consumerExecutor;
       synchronized (this) {
-        // We keep this synchronized block as small as we can.  Note
-        // that in other areas in the code there are threads holding
-        // this object's monitor.
-        consumerExecutor = this.consumerExecutor;
-        this.consumerExecutor = null;
+        // We keep this synchronized block as small as we can since in
+        // other areas in the code there are threads holding this
+        // object's monitor.
+        //
+        // Cancel the consumer pump task and begin the lengthy process
+        // of shutting down the pump itself.
         if (this.eventQueueConsumptionTask != null) {
           this.eventQueueConsumptionTask.cancel(true);
           this.eventQueueConsumptionTask = null;
         }
+        consumerExecutor = this.consumerExecutor;
+        this.consumerExecutor = null;
       }
 
       if (consumerExecutor != null) {
@@ -780,12 +820,14 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         // Stop accepting new tasks.
         consumerExecutor.shutdown();
 
-        // Cancel all tasks firmly (there shouldn't be any).
+        // Cancel all running tasks firmly (there shouldn't be any,
+        // but it's the right thing to do).
         consumerExecutor.shutdownNow();
 
         try {
-          // Wait for termination to complete normally.  This SHOULD
-          // complete instantly.
+          // Wait for termination to complete normally.  This should
+          // complete instantly because there aren't any running
+          // tasks.
           if (!consumerExecutor.awaitTermination(60, TimeUnit.SECONDS) && this.logger.isLoggable(Level.WARNING)) {
             this.logger.logp(Level.WARNING, cn, mn, "this.consumerExecutor.awaitTermination() failed");
           }
@@ -891,23 +933,34 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     final EventQueue<T> returnValue;
     synchronized (this) {
       while (this.isEmpty() && !this.closing) {
-        this.wait(); // blocks
+        this.wait(); // blocks; see add() for corresponding notifyAll()
       }
+
+      // We can assert this because add() is the method that calls
+      // notifyAll(), and add() sets populated to true before it calls
+      // notifyAll().  The notifyAll() call is the only way that the
+      // blocking wait() call above will exit other than interruption,
+      // and if it exited via interruption, an InterruptedException
+      // would have been thrown and we'd never get here.
       assert this.populated : "this.populated == false";
+
       if (this.isEmpty()) {
         assert this.closing : "this.isEmpty() && !this.closing";
         returnValue = null;
       } else {
+
+        // Pop the first EventQueue off and return it.
         final Iterator<EventQueue<T>> iterator = this.map.values().iterator();
         assert iterator != null;
         assert iterator.hasNext();
         returnValue = iterator.next();
         assert returnValue != null;
         iterator.remove();
+
         if (this.initialPopulationCount > 0) {
           // We know we're not populated and our
           // initialPopulationCount is not 0, so therefore we are not
-          // synchronized.
+          // synchronized.  See isSynchronized().
           assert !this.isSynchronized();
           final int oldInitialPopulationCount = this.initialPopulationCount;
           this.initialPopulationCount--;
@@ -970,6 +1023,33 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     return returnValue;
   }
 
+  /**
+   * Creates a {@link SynchronizationEvent} using the supplied raw
+   * materials and returns it.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * <p>Implementations of this method must not return {@code
+   * null}.</p>
+   *
+   * <p>Implementations of this method must return a new {@link
+   * SynchronizationEvent} with every invocation.</p>
+   *
+   * @param source the {@linkplain SynchronizationEvent#getSource()
+   * source} of the {@link SynchronizationEvent} that will be created;
+   * must not be null
+   *
+   * @param eventType the {@linkplain Event#getType() type} of {@link
+   * SynchronizationEvent} that will be created; must not be {@code
+   * null}
+   *
+   * @param resource the {@linkplain Event#getResource() resource} of
+   * the {@link SynchronizationEvent} that will be created; must not
+   * be {@code null}
+   *
+   * @return the created {@link SynchronizationEvent}; never {@code
+   * null}
+   */
   protected SynchronizationEvent<T> createSynchronizationEvent(final Object source, final AbstractEvent.Type eventType, final T resource) {
     final String cn = this.getClass().getName();
     final String mn = "createSynchronizationEvent";
@@ -988,11 +1068,20 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     return returnValue;
   }
 
-  private final SynchronizationEvent<T> synchronize(final Object source, final AbstractEvent.Type eventType, final T resource, final boolean populate) {
+  private final SynchronizationEvent<T> addSynchronizationEvent(final Object source,
+                                                                final AbstractEvent.Type eventType,
+                                                                final T resource) {
+    return this.addSynchronizationEvent(source, eventType, resource, true);
+  }
+  
+  private final SynchronizationEvent<T> addSynchronizationEvent(final Object source,
+                                                                final AbstractEvent.Type eventType,
+                                                                final T resource,
+                                                                final boolean populate) {
     final String cn = this.getClass().getName();
-    final String mn = "synchronize";
+    final String mn = "addSynchronizationEvent";
     if (this.logger.isLoggable(Level.FINER)) {
-      this.logger.entering(cn, mn, new Object[] { source, eventType, resource });
+      this.logger.entering(cn, mn, new Object[] { source, eventType, resource, Boolean.valueOf(populate) });
     }
 
     Objects.requireNonNull(source);
@@ -1086,7 +1175,10 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    *
    * @see Event
    */
-  private final Event<T> add(final Object source, final AbstractEvent.Type eventType, final T resource, final boolean populate) {
+  private final Event<T> add(final Object source,
+                             final AbstractEvent.Type eventType,
+                             final T resource,
+                             final boolean populate) {
     final String cn = this.getClass().getName();
     final String mn = "add";
     if (this.logger.isLoggable(Level.FINER)) {
@@ -1157,14 +1249,16 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
 
     synchronized (this) {
 
-      if (populate) {
-        final boolean old = this.populated;
+      if (populate && !this.populated) {
         this.populated = true;
-        this.firePropertyChange("populated", old, true);
+        // TODO: too early?
+        this.firePropertyChange("populated", false, true);
       }
 
       EventQueue<T> eventQueue = this.map.get(key);
+
       final boolean eventQueueExisted = eventQueue != null;
+
       if (!eventQueueExisted) {
         eventQueue = this.createEventQueue(key);
         if (eventQueue == null) {
@@ -1192,9 +1286,10 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         // result in an empty queue.  We don't permit empty queues.
         if (eventQueueExisted) {
           returnValue = null;
-          final boolean old = this.isEmpty();
-          this.map.remove(key);
-          this.firePropertyChange("empty", old, this.isEmpty());
+          final boolean oldEmpty = this.isEmpty();
+          final Object oldEventQueue = this.map.remove(key);
+          assert oldEventQueue != null;
+          this.firePropertyChange("empty", oldEmpty, this.isEmpty());
         } else {
           // Nothing to do; the queue we added the event to was
           // created here, and was never added to our internal map, so
@@ -1203,11 +1298,12 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       } else if (!eventQueueExisted) {
         // We created the EventQueue we just added to; now we need to
         // store it.
-        final boolean old = this.isEmpty();
-        this.map.put(key, eventQueue);
-        this.firePropertyChange("empty", old, this.isEmpty());
+        final boolean oldEmpty = this.isEmpty();
+        final Object oldEventQueue = this.map.put(key, eventQueue);
+        assert oldEventQueue == null;
+        this.firePropertyChange("empty", oldEmpty, this.isEmpty());
         // Notify anyone blocked on our empty state that we're no
-        // longer empty
+        // longer empty.
         this.notifyAll();
       }
 

@@ -52,7 +52,7 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
    * Instance fields.
    */
 
-  
+
   /**
    * A mutable {@link Map} of {@link HasMetadata} objects indexed by
    * their keys (often a pairing of namespace and name).
@@ -82,7 +82,7 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
    */
   protected final Logger logger;
 
-  
+
   /*
    * Constructors.
    */
@@ -93,8 +93,8 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
    *
    * @param knownObjects a mutable {@link Map} of {@link HasMetadata}
    * objects indexed by their keys (often a pairing of namespace and
-   * name); must not be {@code null}; <strong>will have its contents
-   * changed</strong> by this {@link
+   * name); may be {@code null} if deletion tracking is not needed;
+   * <strong>will have its contents changed</strong> by this {@link
    * ResourceTrackingEventQueueConsumer}'s {@link #accept(EventQueue)}
    * method; <strong>will be synchronized on</strong> by this {@link
    * ResourceTrackingEventQueueConsumer}'s {@link #accept(EventQueue)}
@@ -118,7 +118,7 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
         synchronized (knownObjects) {
           knownObjectsString = knownObjects.toString();
         }
-      }      
+      }
       this.logger.entering(cn, mn, knownObjectsString);
     }
     this.knownObjects = knownObjects;
@@ -147,7 +147,7 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
     return Logger.getLogger(this.getClass().getName());
   }
 
-  
+
   /**
    * {@linkplain EventQueue#iterator() Loops through} all the {@link
    * AbstractEvent}s in the supplied {@link EventQueue}, keeping track
@@ -185,19 +185,19 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
         if (this.logger.isLoggable(Level.FINER)) {
           this.logger.entering(cn, mn, eventQueue);
         }
-        
+
         final Object key = eventQueue.getKey();
         if (key == null) {
           throw new IllegalStateException("eventQueue.getKey() == null; eventQueue: " + eventQueue);
-        }        
+        }
 
         for (final AbstractEvent<? extends T> event : eventQueue) {
           if (event != null) {
-            
-            assert key.equals(event.getKey());            
+
+            assert key.equals(event.getKey());
 
             final Event.Type eventType = event.getType();
-            assert eventType != null;            
+            assert eventType != null;
 
             final T newResource = event.getResource();
 
@@ -211,49 +211,56 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
             if (this.knownObjects == null) {
               priorResource = null;
               newEvent = event;
-            } else {
+            } else if (Event.Type.DELETION.equals(eventType)) {
+
+              // "Forget" (untrack) the object in question.
               synchronized (this.knownObjects) {
+                priorResource = this.knownObjects.remove(key);
+              }
 
-                if (Event.Type.DELETION.equals(eventType)) {
+              newEvent = event;
+            } else {
+              assert eventType.equals(Event.Type.ADDITION) || eventType.equals(Event.Type.MODIFICATION);
 
-                  // "Forget" (untrack) the object in question.
-                  priorResource = this.knownObjects.remove(key);
+              // "Learn" (track) the resource in question.
+              synchronized (this.knownObjects) {
+                priorResource = this.knownObjects.put(key, newResource);
+              }
 
+              if (event instanceof SynchronizationEvent) {
+                if (priorResource == null) {
+                  assert Event.Type.ADDITION.equals(eventType) : "!Event.Type.ADDITION.equals(eventType): " + eventType;
                   newEvent = event;
                 } else {
-                  assert eventType.equals(Event.Type.ADDITION) || eventType.equals(Event.Type.MODIFICATION);
-
-                  // "Learn" (track) the resource in question.
-                  priorResource = this.knownObjects.put(key, newResource);
-
-                  if (event instanceof SynchronizationEvent) {
-                    if (priorResource == null) {
-                      assert Event.Type.ADDITION.equals(eventType) : "!Event.Type.ADDITION.equals(eventType): " + eventType;
-                      newEvent = event;
-                    } else {
-                      assert Event.Type.MODIFICATION.equals(eventType) : "!Event.Type.MODIFICATION.equals(eventType): " + eventType;
-                      newEvent = this.createSynchronizationEvent(Event.Type.MODIFICATION, priorResource, newResource);
-                    }
-                  } else if (priorResource == null) {
-                    if (Event.Type.ADDITION.equals(eventType)) {
-                      newEvent = event;
-                    } else {
-                      newEvent = this.createEvent(Event.Type.ADDITION, null, newResource);
-                    }
-                  } else {
-                    newEvent = this.createEvent(Event.Type.MODIFICATION, priorResource, newResource);
-                  }
+                  assert Event.Type.MODIFICATION.equals(eventType) : "!Event.Type.MODIFICATION.equals(eventType): " + eventType;
+                  newEvent = this.createSynchronizationEvent(Event.Type.MODIFICATION, priorResource, newResource);
                 }
-                
+              } else if (priorResource == null) {
+                if (Event.Type.ADDITION.equals(eventType)) {
+                  newEvent = event;
+                } else {
+                  newEvent = this.createEvent(Event.Type.ADDITION, null, newResource);
+                }
+              } else {
+                newEvent = this.createEvent(Event.Type.MODIFICATION, priorResource, newResource);
               }
             }
-            
+
             assert newEvent != null;
             assert newEvent instanceof SynchronizationEvent || newEvent instanceof Event;
+
+            // This is the final consumption/distribution step; it is
+            // an abstract method in this class.
+            //
+            // TODO: this may have
+            // to be a Function instead that returns a boolean.  If
+            // true, then we remove that item from the
+            // knownObjects...?
             this.accept(newEvent);
+
           }
         }
-        
+
       }
     }
     if (this.logger.isLoggable(Level.FINER)) {
@@ -356,5 +363,5 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
    * @see #accept(EventQueue)
    */
   protected abstract void accept(final AbstractEvent<? extends T> event);
-  
+
 }
