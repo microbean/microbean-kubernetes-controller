@@ -273,7 +273,7 @@
 
     <!-- maven-javadoc-plugin properties; see https://maven.apache.org/plugins/maven-javadoc-plugin/javadoc-mojo.html -->
     <doctitle>&lt;a href="${project.url}" target="_parent"&gt;&lt;span style="font-family:Lobster, cursive;"&gt;µb&lt;/span&gt; ${project.artifactId}&lt;/a&gt; ${project.version} &lt;a href="https://travis-ci.org/microbean/${project.artifactId}" target="_parent"&gt;&lt;img src="https://travis-ci.org/microbean/${project.artifactId}.svg?branch=master"&gt;&lt;/a&gt;</doctitle>
-    <links>https://microbean.github.io/microbean-kubernetes/apidocs/,https://microbean.github.io/microbean-development-annotations/apidocs/,http://jcip.net/annotations/doc/,http://static.javadoc.io/io.fabric8/kubernetes-client/3.2.0,http://static.javadoc.io/io.fabric8/kubernetes-model/2.1.1</links>
+    <links>https://microbean.github.io/microbean-kubernetes/apidocs/,https://microbean.github.io/microbean-development-annotations/apidocs/,http://jcip.net/annotations/doc/,http://static.javadoc.io/io.fabric8/kubernetes-client/3.2.0,http://static.javadoc.io/io.fabric8/kubernetes-model/2.1.1,https://square.github.io/okhttp/3.x/okhttp/</links>
     <stylesheetfile>css/stylesheet.css</stylesheetfile>
 
     <!-- maven-project-info-reports-plugin properties; see https://maven.apache.org/plugins/maven-project-info-reports-plugin/ -->

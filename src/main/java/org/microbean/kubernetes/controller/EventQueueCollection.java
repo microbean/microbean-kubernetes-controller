@@ -848,12 +848,33 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     }
   }
 
+  /**
+   * Creates and returns a {@link Runnable} that will serve as the
+   * "body" of a never-ending task that {@linkplain #get() removes the
+   * eldest <code>EventQueue</code>} from this {@link
+   * EventQueueCollection} and {@linkplain Consumer#accept(Object)
+   * supplies it to the supplied <code>siphon</code>}.
+   *
+   * <p>This method never returns {@code null}.</p>
+   *
+   * @param siphon the {@link Consumer} that will act upon the eldest
+   * {@link EventQueue} in this {@link EventQueueCollection}; must not
+   * be {@code null}
+   *
+   * @return a new {@link Runnable}; never {@code null}
+   *
+   * @exception NullPointerException if {@code siphon} is {@code null}
+   */
   private final Runnable createEventQueueConsumptionTask(final Consumer<? super EventQueue<? extends T>> siphon) {
     Objects.requireNonNull(siphon);
     final Runnable returnValue = () -> {
+      // This Runnable loosely models the processLoop() function in
+      // https://github.com/kubernetes/kubernetes/blob/v1.9.0/staging/src/k8s.io/client-go/tools/cache/controller.go#L139-L161.
       try {
         while (!Thread.currentThread().isInterrupted()) {
-          @Blocking
+          // Note that get() *removes* an EventQueue from this
+          // EventQueueCollection, blocking until one is available.
+          @Blocking          
           final EventQueue<T> eventQueue = this.get();
           if (eventQueue != null) {
             Throwable unhandledThrowable = null;
@@ -888,14 +909,19 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
   }
 
   /**
-   * Returns an {@link EventQueue} if one is available,
-   * <strong>blocking if one is not</strong> and returning {@code
-   * null} only if the {@linkplain Thread#interrupt() current thread
-   * is interrupted}.
+   * Implements the {@link Supplier#get()} contract by
+   * <strong>removing</strong> and returning an {@link EventQueue} if
+   * one is available, <strong>blocking if one is not</strong> and
+   * returning {@code null} only if the {@linkplain Thread#interrupt()
+   * current thread is interrupted} or this {@linkplain
+   * EventQueueCollection#close() <code>EventQueueCollection</code> is
+   * closing}.
    *
-   * <p>This method may return {@code null} in which case the current
-   * {@link Thread} has been {@linkplain Thread#interrupt()
-   * interrupted}.</p>
+   * <h2>Design Notes</h2>
+   *
+   * <p>This method calls an internal method that models the <a
+   * href="https://github.com/kubernetes/client-go/blob/03bfb9bdcfe5482795b999f39ca3ed9ad42ce5bb/tools/cache/delta_fifo.go#L407-L453">{@code
+   * Pop} function in {@code delta_fifo.go}</a>.</p>
    *
    * @return an {@link EventQueue}, or {@code null}
    */
@@ -922,6 +948,32 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     return returnValue;
   }
 
+  /**
+   * Blocks until there is an {@link EventQueue} in this {@link
+   * EventQueueCollection} available for removal whereupon it is
+   * removed and returned.
+   *
+   * <p>This method may return {@code null} if it is invoked while
+   * this {@linkplain #close() <code>EventQueueCollection</code> is
+   * closing}.</p>
+   *
+   * <h2>Design Notes</h2>
+   *
+   * <p>This method models the <a
+   * href="https://github.com/kubernetes/client-go/blob/03bfb9bdcfe5482795b999f39ca3ed9ad42ce5bb/tools/cache/delta_fifo.go#L407-L453">{@code
+   * Pop} function in {@code delta_fifo.go}</a>.</p>
+   *
+   * <p>This method is called internally only by the {@link #get()}
+   * method, which is its {@code public}-facing counterpart.  {@link
+   * #get()} cannot, by contract, throw an {@link
+   * InterruptedException}; hence this method.</p>
+   *
+   * @return the {@link EventQueue} that was removed (taken), or, in
+   * exceptional circumstances, {@code null}
+   *
+   * @exception InterruptedException if the {@link
+   * Thread#currentThread() current thread} was interrupted
+   */
   @Blocking
   private final EventQueue<T> take() throws InterruptedException {
     final String cn = this.getClass().getName();

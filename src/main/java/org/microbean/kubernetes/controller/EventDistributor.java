@@ -353,6 +353,12 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
    * from the queue and forwards them to the "real" {@link Consumer}
    * supplied at construction time.
    *
+   * <p>A {@link Pump} differs from a simple {@link Consumer} of
+   * {@link AbstractEvent} instances in that it has its own
+   * {@linkplain #getSynchronizationInterval() synchronization
+   * interval}, and interposes a blocking queue in between the
+   * reception of an {@link AbstractEvent} and its eventual broadcast.</p>
+   *
    * @author <a href="https://about.me/lairdnelson"
    * target="_parent">Laird Nelson</a>
    */
@@ -394,6 +400,7 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
         this.logger.entering(cn, mn, new Object[] { synchronizationInterval, eventConsumer, errorHandler });
       }
 
+      // TODO: this should be extensible
       this.queue = new LinkedBlockingQueue<>();
       this.eventConsumer = Objects.requireNonNull(eventConsumer);
       if (errorHandler == null) {
