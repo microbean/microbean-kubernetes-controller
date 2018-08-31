@@ -1,0 +1,25 @@
+A SharedIndexInformer creates a new Indexer.
+
+The Indexer creates a new ThreadSafeStore; you can't change this.
+
+The ThreadSafeStore is paired with user-supplied Indexers.
+
+An Indexers (plural English, singular object) is a map of strings to
+indexing functions.
+
+SharedIndexInformer.Run() creates a new DeltaFIFO with the new Indexer
+(https://github.com/kubernetes/client-go/blob/master/tools/cache/shared_informer.go#L192).
+
+The Indexer supplied to the new DeltaFIFO functions as its KeyLister
+and its KeyGetter.
+
+This means the ThreadSafeStore that is created by the Indexer that
+belongs to the SharedIndexInformer is where known objects live.
+
+The HandleDeltas function that the SharedIndexInformer uses to process
+things updates the Indexer
+(https://github.com/kubernetes/client-go/blob/03bfb9bdcfe5482795b999f39ca3ed9ad42ce5bb/tools/cache/shared_informer.go#L355).
+
+This means that the `ThreadSafeStore` will never be cleaned out.
+Specifically, Delete will not be called on it unless there's a
+corresponding delete in Kubernetes itself.

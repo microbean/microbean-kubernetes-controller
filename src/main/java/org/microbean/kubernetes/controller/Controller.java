@@ -77,6 +77,18 @@ import org.microbean.development.annotation.NonBlocking;
  * <p>Instances of this class are safe for concurrent use by multiple
  * threads.</p>
  *
+ * <h2>Design Notes</h2>
+ *
+ * <p>This class loosely models a combination of a <a
+ * href="https://github.com/kubernetes/client-go/blob/79cb21f5b3b1dd8f8b23bd3f79925b4fda4e2562/tools/cache/controller.go#L82-L86">{@code
+ * Controller} type</a> and a <a
+ * href="https://github.com/kubernetes/client-go/blob/79cb21f5b3b1dd8f8b23bd3f79925b4fda4e2562/tools/cache/shared_informer.go#L66-L71">{@code
+ * SharedIndexInformer} type</a> as found in <a
+ * href="https://github.com/kubernetes/client-go/blob/master/tools/cache/controller.go">{@code
+ * controller.go}</a> and <a
+ * href="https://github.com/kubernetes/client-go/blob/master/tools/cache/shared_informer.go">{@code
+ * shared_informer.go}</a> respectively.</p>
+ *
  * @param <T> a Kubernetes resource type
  *
  * @author <a href="https://about.me/lairdnelson"
