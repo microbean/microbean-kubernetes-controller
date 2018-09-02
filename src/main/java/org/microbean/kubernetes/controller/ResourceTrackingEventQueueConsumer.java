@@ -251,11 +251,6 @@ public abstract class ResourceTrackingEventQueueConsumer<T extends HasMetadata> 
 
             // This is the final consumption/distribution step; it is
             // an abstract method in this class.
-            //
-            // TODO: this may have
-            // to be a Function instead that returns a boolean.  If
-            // true, then we remove that item from the
-            // knownObjects...?
             this.accept(newEvent);
 
           }

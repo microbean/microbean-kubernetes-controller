@@ -1,11 +1,16 @@
-A SharedIndexInformer creates a new Indexer.
+A SharedIndexInformer creates a new Indexer.  You can get it, but you
+can't set it
+(https://github.com/kubernetes/client-go/blob/03bfb9bdcfe5482795b999f39ca3ed9ad42ce5bb/tools/cache/shared_informer.go#L83).
 
-The Indexer creates a new ThreadSafeStore; you can't change this.
+The Indexer creates a new ThreadSafeStore; you can't change this
+(https://github.com/kubernetes/client-go/blob/03bfb9bdcfe5482795b999f39ca3ed9ad42ce5bb/tools/cache/store.go#L241).
 
-The ThreadSafeStore is paired with user-supplied Indexers.
+The ThreadSafeStore is paired with user-supplied Indexers
+(https://github.com/kubernetes/client-go/blob/03bfb9bdcfe5482795b999f39ca3ed9ad42ce5bb/tools/cache/store.go#L241).
 
 An Indexers (plural English, singular object) is a map of strings to
-indexing functions.
+indexing functions
+(https://github.com/kubernetes/client-go/blob/03bfb9bdcfe5482795b999f39ca3ed9ad42ce5bb/tools/cache/index.go#L84).
 
 SharedIndexInformer.Run() creates a new DeltaFIFO with the new Indexer
 (https://github.com/kubernetes/client-go/blob/master/tools/cache/shared_informer.go#L192).
@@ -23,3 +28,37 @@ things updates the Indexer
 This means that the `ThreadSafeStore` will never be cleaned out.
 Specifically, Delete will not be called on it unless there's a
 corresponding delete in Kubernetes itself.
+
+---
+
+You might be tempted to think that we're storing too many redundant
+copies of the state of any given Kubernetes resource. But see
+https://github.com/kubernetes/client-go/blob/03bfb9bdcfe5482795b999f39ca3ed9ad42ce5bb/tools/cache/delta_fifo.go#L320.
+
+In other words, an event comes in with its state.  The Go code stores
+it in a queue.  So add, modify, modify: there will be three copies of
+the object in that queue.
+
+But that queue is constantly being emptied.  In the Go code, the
+ProcessFunc is usually HandleDeltas, and HandleDeltas takes the Delta
+(the event) from the queue, grabs its object (the resource, one of
+several possibly redundant representations) and then adds it to the
+knownObjects (the Indexer)
+(https://github.com/kubernetes/client-go/blob/03bfb9bdcfe5482795b999f39ca3ed9ad42ce5bb/tools/cache/shared_informer.go#L350-L370).
+
+So we *are* in fact being faithful to the Go code: we have a map of
+event queues indexed by key (just as the Go code has a map of queues
+containing Deltas indexed by key).
+
+The Go code indicates that the cache (the knownObjects, the Indexer)
+may be fresher than an event
+(https://github.com/kubernetes/client-go/blob/03bfb9bdcfe5482795b999f39ca3ed9ad42ce5bb/tools/cache/shared_informer.go#L36-L37):
+that is, if you ask the cache (the knownObjects, the Indexer) for a
+pod named foo/bar, the representation you get back may be slightly
+"newer" than the representation in the event that caused you to take
+action in the first place.  This is because in HandleDeltas (see the
+link) the knownObjects/cache/Indexer is mutated first, then the event
+is distributed.  Equivalently, in the Java code here, it's because
+knownObjects is mutated under its own lock first, then the lock is
+released, then the event is broadcast.
+
