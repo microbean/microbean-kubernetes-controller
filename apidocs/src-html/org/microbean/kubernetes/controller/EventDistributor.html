@@ -100,10 +100,10 @@
 <span class="sourceLineNo">092</span><a name="line.92"></a>
 <span class="sourceLineNo">093</span><a name="line.93"></a>
 <span class="sourceLineNo">094</span>  @GuardedBy("readLock &amp;&amp; writeLock")<a name="line.94"></a>
-<span class="sourceLineNo">095</span>  private final Collection&lt;Pump&lt;T&gt;&gt; distributors;<a name="line.95"></a>
+<span class="sourceLineNo">095</span>  private final Collection&lt;Pump&lt;T&gt;&gt; pumps;<a name="line.95"></a>
 <span class="sourceLineNo">096</span><a name="line.96"></a>
 <span class="sourceLineNo">097</span>  @GuardedBy("readLock &amp;&amp; writeLock")<a name="line.97"></a>
-<span class="sourceLineNo">098</span>  private final Collection&lt;Pump&lt;T&gt;&gt; synchronizingDistributors;<a name="line.98"></a>
+<span class="sourceLineNo">098</span>  private final Collection&lt;Pump&lt;T&gt;&gt; synchronizingPumps;<a name="line.98"></a>
 <span class="sourceLineNo">099</span><a name="line.99"></a>
 <span class="sourceLineNo">100</span>  private final Duration synchronizationInterval;<a name="line.100"></a>
 <span class="sourceLineNo">101</span><a name="line.101"></a>
@@ -151,8 +151,8 @@
 <span class="sourceLineNo">143</span>    final ReadWriteLock lock = new ReentrantReadWriteLock();<a name="line.143"></a>
 <span class="sourceLineNo">144</span>    this.readLock = lock.readLock();<a name="line.144"></a>
 <span class="sourceLineNo">145</span>    this.writeLock = lock.writeLock();<a name="line.145"></a>
-<span class="sourceLineNo">146</span>    this.distributors = new ArrayList&lt;&gt;();<a name="line.146"></a>
-<span class="sourceLineNo">147</span>    this.synchronizingDistributors = new ArrayList&lt;&gt;();<a name="line.147"></a>
+<span class="sourceLineNo">146</span>    this.pumps = new ArrayList&lt;&gt;();<a name="line.146"></a>
+<span class="sourceLineNo">147</span>    this.synchronizingPumps = new ArrayList&lt;&gt;();<a name="line.147"></a>
 <span class="sourceLineNo">148</span>    this.synchronizationInterval = synchronizationInterval;<a name="line.148"></a>
 <span class="sourceLineNo">149</span>  }<a name="line.149"></a>
 <span class="sourceLineNo">150</span><a name="line.150"></a>
@@ -204,10 +204,10 @@
 <span class="sourceLineNo">196</span>    if (consumer != null) {<a name="line.196"></a>
 <span class="sourceLineNo">197</span>      this.writeLock.lock();<a name="line.197"></a>
 <span class="sourceLineNo">198</span>      try {<a name="line.198"></a>
-<span class="sourceLineNo">199</span>        final Pump&lt;T&gt; distributor = new Pump&lt;&gt;(this.synchronizationInterval, consumer, errorHandler);<a name="line.199"></a>
-<span class="sourceLineNo">200</span>        distributor.start();<a name="line.200"></a>
-<span class="sourceLineNo">201</span>        this.distributors.add(distributor);<a name="line.201"></a>
-<span class="sourceLineNo">202</span>        this.synchronizingDistributors.add(distributor);<a name="line.202"></a>
+<span class="sourceLineNo">199</span>        final Pump&lt;T&gt; pump = new Pump&lt;&gt;(this.synchronizationInterval, consumer, errorHandler);<a name="line.199"></a>
+<span class="sourceLineNo">200</span>        pump.start();<a name="line.200"></a>
+<span class="sourceLineNo">201</span>        this.pumps.add(pump);<a name="line.201"></a>
+<span class="sourceLineNo">202</span>        this.synchronizingPumps.add(pump);<a name="line.202"></a>
 <span class="sourceLineNo">203</span>      } finally {<a name="line.203"></a>
 <span class="sourceLineNo">204</span>        this.writeLock.unlock();<a name="line.204"></a>
 <span class="sourceLineNo">205</span>      }<a name="line.205"></a>
@@ -228,12 +228,12 @@
 <span class="sourceLineNo">220</span>    if (consumer != null) {<a name="line.220"></a>
 <span class="sourceLineNo">221</span>      this.writeLock.lock();<a name="line.221"></a>
 <span class="sourceLineNo">222</span>      try {<a name="line.222"></a>
-<span class="sourceLineNo">223</span>        final Iterator&lt;? extends Pump&lt;?&gt;&gt; iterator = this.distributors.iterator();<a name="line.223"></a>
+<span class="sourceLineNo">223</span>        final Iterator&lt;? extends Pump&lt;?&gt;&gt; iterator = this.pumps.iterator();<a name="line.223"></a>
 <span class="sourceLineNo">224</span>        assert iterator != null;<a name="line.224"></a>
 <span class="sourceLineNo">225</span>        while (iterator.hasNext()) {<a name="line.225"></a>
-<span class="sourceLineNo">226</span>          final Pump&lt;?&gt; distributor = iterator.next();<a name="line.226"></a>
-<span class="sourceLineNo">227</span>          if (distributor != null &amp;&amp; consumer.equals(distributor.getEventConsumer())) {<a name="line.227"></a>
-<span class="sourceLineNo">228</span>            distributor.close();<a name="line.228"></a>
+<span class="sourceLineNo">226</span>          final Pump&lt;?&gt; pump = iterator.next();<a name="line.226"></a>
+<span class="sourceLineNo">227</span>          if (pump != null &amp;&amp; consumer.equals(pump.getEventConsumer())) {<a name="line.227"></a>
+<span class="sourceLineNo">228</span>            pump.close();<a name="line.228"></a>
 <span class="sourceLineNo">229</span>            iterator.remove();<a name="line.229"></a>
 <span class="sourceLineNo">230</span>            break;<a name="line.230"></a>
 <span class="sourceLineNo">231</span>          }<a name="line.231"></a>
@@ -252,12 +252,12 @@
 <span class="sourceLineNo">244</span>  public final void close() {<a name="line.244"></a>
 <span class="sourceLineNo">245</span>    this.writeLock.lock();<a name="line.245"></a>
 <span class="sourceLineNo">246</span>    try {<a name="line.246"></a>
-<span class="sourceLineNo">247</span>      this.distributors.stream()<a name="line.247"></a>
-<span class="sourceLineNo">248</span>        .forEach(distributor -&gt; {<a name="line.248"></a>
-<span class="sourceLineNo">249</span>            distributor.close();<a name="line.249"></a>
+<span class="sourceLineNo">247</span>      this.pumps.stream()<a name="line.247"></a>
+<span class="sourceLineNo">248</span>        .forEach(pump -&gt; {<a name="line.248"></a>
+<span class="sourceLineNo">249</span>            pump.close();<a name="line.249"></a>
 <span class="sourceLineNo">250</span>          });<a name="line.250"></a>
-<span class="sourceLineNo">251</span>      this.synchronizingDistributors.clear();<a name="line.251"></a>
-<span class="sourceLineNo">252</span>      this.distributors.clear();<a name="line.252"></a>
+<span class="sourceLineNo">251</span>      this.synchronizingPumps.clear();<a name="line.251"></a>
+<span class="sourceLineNo">252</span>      this.pumps.clear();<a name="line.252"></a>
 <span class="sourceLineNo">253</span>    } finally {<a name="line.253"></a>
 <span class="sourceLineNo">254</span>      this.writeLock.unlock();<a name="line.254"></a>
 <span class="sourceLineNo">255</span>    }<a name="line.255"></a>
@@ -284,15 +284,15 @@
 <span class="sourceLineNo">276</span>    boolean returnValue = false;<a name="line.276"></a>
 <span class="sourceLineNo">277</span>    this.writeLock.lock();<a name="line.277"></a>
 <span class="sourceLineNo">278</span>    try {<a name="line.278"></a>
-<span class="sourceLineNo">279</span>      this.synchronizingDistributors.clear();<a name="line.279"></a>
+<span class="sourceLineNo">279</span>      this.synchronizingPumps.clear();<a name="line.279"></a>
 <span class="sourceLineNo">280</span>      final Instant now = Instant.now();<a name="line.280"></a>
-<span class="sourceLineNo">281</span>      this.distributors.stream()<a name="line.281"></a>
-<span class="sourceLineNo">282</span>        .filter(distributor -&gt; distributor.shouldSynchronize(now))<a name="line.282"></a>
-<span class="sourceLineNo">283</span>        .forEach(distributor -&gt; {<a name="line.283"></a>
-<span class="sourceLineNo">284</span>            this.synchronizingDistributors.add(distributor);<a name="line.284"></a>
-<span class="sourceLineNo">285</span>            distributor.determineNextSynchronizationInterval(now);<a name="line.285"></a>
+<span class="sourceLineNo">281</span>      this.pumps.stream()<a name="line.281"></a>
+<span class="sourceLineNo">282</span>        .filter(pump -&gt; pump.shouldSynchronize(now))<a name="line.282"></a>
+<span class="sourceLineNo">283</span>        .forEach(pump -&gt; {<a name="line.283"></a>
+<span class="sourceLineNo">284</span>            this.synchronizingPumps.add(pump);<a name="line.284"></a>
+<span class="sourceLineNo">285</span>            pump.determineNextSynchronizationInterval(now);<a name="line.285"></a>
 <span class="sourceLineNo">286</span>          });<a name="line.286"></a>
-<span class="sourceLineNo">287</span>      returnValue = !this.synchronizingDistributors.isEmpty();<a name="line.287"></a>
+<span class="sourceLineNo">287</span>      returnValue = !this.synchronizingPumps.isEmpty();<a name="line.287"></a>
 <span class="sourceLineNo">288</span>    } finally {<a name="line.288"></a>
 <span class="sourceLineNo">289</span>      this.writeLock.unlock();<a name="line.289"></a>
 <span class="sourceLineNo">290</span>    }<a name="line.290"></a>
@@ -328,9 +328,9 @@
 <span class="sourceLineNo">320</span>  private final void accept(final SynchronizationEvent&lt;? extends T&gt; event) {<a name="line.320"></a>
 <span class="sourceLineNo">321</span>    this.readLock.lock();<a name="line.321"></a>
 <span class="sourceLineNo">322</span>    try {<a name="line.322"></a>
-<span class="sourceLineNo">323</span>      if (!this.synchronizingDistributors.isEmpty()) {<a name="line.323"></a>
-<span class="sourceLineNo">324</span>        this.synchronizingDistributors.stream()<a name="line.324"></a>
-<span class="sourceLineNo">325</span>          .forEach(distributor -&gt; distributor.accept(event));<a name="line.325"></a>
+<span class="sourceLineNo">323</span>      if (!this.synchronizingPumps.isEmpty()) {<a name="line.323"></a>
+<span class="sourceLineNo">324</span>        this.synchronizingPumps.stream()<a name="line.324"></a>
+<span class="sourceLineNo">325</span>          .forEach(pump -&gt; pump.accept(event));<a name="line.325"></a>
 <span class="sourceLineNo">326</span>      }<a name="line.326"></a>
 <span class="sourceLineNo">327</span>    } finally {<a name="line.327"></a>
 <span class="sourceLineNo">328</span>      this.readLock.unlock();<a name="line.328"></a>
@@ -340,9 +340,9 @@
 <span class="sourceLineNo">332</span>  private final void accept(final Event&lt;? extends T&gt; event) {<a name="line.332"></a>
 <span class="sourceLineNo">333</span>    this.readLock.lock();<a name="line.333"></a>
 <span class="sourceLineNo">334</span>    try {<a name="line.334"></a>
-<span class="sourceLineNo">335</span>      if (!this.distributors.isEmpty()) {<a name="line.335"></a>
-<span class="sourceLineNo">336</span>        this.distributors.stream()<a name="line.336"></a>
-<span class="sourceLineNo">337</span>          .forEach(distributor -&gt; distributor.accept(event));<a name="line.337"></a>
+<span class="sourceLineNo">335</span>      if (!this.pumps.isEmpty()) {<a name="line.335"></a>
+<span class="sourceLineNo">336</span>        this.pumps.stream()<a name="line.336"></a>
+<span class="sourceLineNo">337</span>          .forEach(pump -&gt; pump.accept(event));<a name="line.337"></a>
 <span class="sourceLineNo">338</span>      }<a name="line.338"></a>
 <span class="sourceLineNo">339</span>    } finally {<a name="line.339"></a>
 <span class="sourceLineNo">340</span>      this.readLock.unlock();<a name="line.340"></a>
