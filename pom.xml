@@ -234,7 +234,12 @@
         <plugin>
           <groupId>org.owasp</groupId>
           <artifactId>dependency-check-maven</artifactId>
-          <version>3.2.1</version>                    
+          <version>3.2.1</version>
+          <configuration>
+            <failOnError>false</failOnError>
+            <name>National Vulnerability Database Report</name>
+            <suppressionFile>${basedir}/src/dependency-check/suppressions.xml</suppressionFile>
+          </configuration>
         </plugin>
         
       </plugins>
@@ -264,7 +269,6 @@
   <properties>
     
     <!-- dependency-check-plugin properties; see -->
-    <suppressionFile>${basedir}/src/dependency-check/suppressions.xml</suppressionFile>
     
     <!-- findbugs-maven-plugin properties; see http://gleclaire.github.io/findbugs-maven-plugin/findbugs-mojo.html -->
     <findbugs.effort>Max</findbugs.effort>

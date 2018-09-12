@@ -490,6 +490,9 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * @param timeUnit the {@link TimeUnit} designating the amount of
    * time to wait; must not be {@code null}
    *
+   * @return {@code false} if the waiting time elapsed before the
+   * event cache synchronized; {@code true} otherwise
+   *
    * @exception InterruptedException if the current {@link Thread} was
    * interrupted
    *
@@ -499,8 +502,8 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * @see EventQueueCollection.SynchronizationAwaitingPropertyChangeListener
    */
   @Blocking
-  public final void awaitEventCacheSynchronization(final long timeout, final TimeUnit timeUnit) throws InterruptedException {
-    this.synchronizationAwaiter.await(timeout, timeUnit);
+  public final boolean awaitEventCacheSynchronization(final long timeout, final TimeUnit timeUnit) throws InterruptedException {
+    return this.synchronizationAwaiter.await(timeout, timeUnit);
   }
   
   /**

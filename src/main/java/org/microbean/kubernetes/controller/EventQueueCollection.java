@@ -153,7 +153,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * @see #add(Object, AbstractEvent.Type, HasMetadata)
    */
   @GuardedBy("this")
-  private final LinkedHashMap<Object, EventQueue<T>> map;
+  private final LinkedHashMap<Object, EventQueue<T>> eventQueueMap;
 
   /**
    * A {@link Map} containing the last known state of Kubernetes
@@ -296,7 +296,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     }
 
     this.propertyChangeSupport = new PropertyChangeSupport(this);
-    this.map = new LinkedHashMap<>(initialCapacity, loadFactor);
+    this.eventQueueMap = new LinkedHashMap<>(initialCapacity, loadFactor);
     this.knownObjects = knownObjects;
     if (errorHandler == null) {
       this.errorHandler = t -> {
@@ -345,7 +345,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * empty; {@code false} otherwise
    */
   private synchronized final boolean isEmpty() {
-    return this.map.isEmpty();
+    return this.eventQueueMap.isEmpty();
   }
 
   /**
@@ -402,10 +402,15 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
 
                   // We follow the Go code in that we use *our* key
                   // extraction logic, rather than relying on the
-                  // known key in the knownObjects map.
+                  // known key in the knownObjects map.  See
+                  // https://github.com/kubernetes/client-go/blob/37c3c02ec96533daec0dbda1f39a6b1d68505c79/tools/cache/delta_fifo.go#L567.
+                  // I'm not sure this is significant as they should
+                  // evaluate to the same thing, but there may be an
+                  // edge case I'm not thinking of.
                   final Object key = this.getKey(knownObject);
+                  
                   if (key != null) {
-                    final EventQueue<T> eventQueue = this.map.get(key);
+                    final EventQueue<T> eventQueue = this.eventQueueMap.get(key);
                     if (eventQueue == null || eventQueue.isEmpty()) {
                       // There was an object in our knownObjects map
                       // somehow, but not in one of the queues we
@@ -414,9 +419,10 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
                       // We make a SynchronizationEvent of type
                       // MODIFICATION.  shared_informer.go checks in
                       // its HandleDeltas function to see if oldObj
-                      // exists; if so, it's a modification.  Here we
-                      // take action *only if* the equivalent of
-                      // oldObj exists, therefore this is a
+                      // exists; if so, it's a modification
+                      // (https://github.com/kubernetes/client-go/blob/37c3c02ec96533daec0dbda1f39a6b1d68505c79/tools/cache/shared_informer.go#L354-L358).
+                      // Here we take action *only if* the equivalent
+                      // of oldObj exists, therefore this is a
                       // SynchronizationEvent of type MODIFICATION,
                       // not ADDITION.
                       this.addSynchronizationEvent(this, AbstractEvent.Type.MODIFICATION, knownObject);
@@ -438,9 +444,17 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
   /**
    * At a high level, fully replaces the internal state of this {@link
    * EventQueueCollection} to reflect only the Kubernetes resources
-   * contained in the supplied {@link Collection}, notionally firing
-   * {@link SynchronizationEvent}s and {@link Event}s of type {@link
-   * AbstractEvent.Type#DELETION} as appropriate.
+   * contained in the supplied {@link Collection}.
+   *
+   * <p>{@link SynchronizationEvent}s of type {@link
+   * AbstractEvent.Type#ADDITION} are added for every resource present
+   * in the {@code incomingResources} parameter.</p>
+   *
+   * <p>{@link Event}s of type {@link AbstractEvent.Type#DELETION} are
+   * added when this {@link EventQueueCollection} can determine that
+   * the lack of a resource's presence in the {@code
+   * incomingResources} parameter indicates that it has been deleted
+   * from Kubernetes.</p>
    *
    * <p>{@link EventQueue}s managed by this {@link
    * EventQueueCollection} that have not yet {@linkplain
@@ -453,14 +467,15 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    *
    * @param incomingResources the {@link Collection} of Kubernetes
    * resources with which to replace this {@link
-   * EventQueueCollection}'s internal state; may be {@code null} or
-   * {@linkplain Collection#isEmpty() empty}, which will be taken as
-   * an indication that this {@link EventQueueCollection} should
-   * effectively be emptied
+   * EventQueueCollection}'s internal state; <strong>will be
+   * synchronized on</strong>; may be {@code null} or {@linkplain
+   * Collection#isEmpty() empty}, which will be taken as an indication
+   * that this {@link EventQueueCollection} should effectively be
+   * emptied
    *
    * @param resourceVersion the version of the Kubernetes list
    * resource that contained the incoming resources; currently
-   * ignored; may be {@code null}
+   * ignored but reserved for future use; may be {@code null}
    *
    * @exception IllegalStateException if the {@link
    * #createEvent(Object, AbstractEvent.Type, HasMetadata)} method returns
@@ -530,7 +545,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       // to say, effectively, "The object was deleted but we don't
       // know what its prior state was".
 
-      for (final EventQueue<T> eventQueue : this.map.values()) {
+      for (final EventQueue<T> eventQueue : this.eventQueueMap.values()) {
         assert eventQueue != null;
 
         final Object key;
@@ -914,7 +929,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
               try {
                 eventQueueConsumer.accept(eventQueue);
               } catch (final TransientException transientException) {
-                this.map.putIfAbsent(eventQueue.getKey(), eventQueue);
+                this.eventQueueMap.putIfAbsent(eventQueue.getKey(), eventQueue);
               } catch (final Throwable e) {
                 unhandledThrowable = e;
               }
@@ -1045,7 +1060,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       } else {
 
         // Pop the first EventQueue off and return it.
-        final Iterator<EventQueue<T>> iterator = this.map.values().iterator();
+        final Iterator<EventQueue<T>> iterator = this.eventQueueMap.values().iterator();
         assert iterator != null;
         assert iterator.hasNext();
         returnValue = iterator.next();
@@ -1099,6 +1114,8 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * {@code null}
    *
    * @return the created {@link Event}; never {@code null}
+   *
+   * @exception NullPointerException if any parameter is {@code null}
    */
   protected Event<T> createEvent(final Object source, final AbstractEvent.Type eventType, final T resource) {
     final String cn = this.getClass().getName();
@@ -1144,6 +1161,8 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    *
    * @return the created {@link SynchronizationEvent}; never {@code
    * null}
+   *
+   * @exception NullPointerException if any parameter is {@code null}
    */
   protected SynchronizationEvent<T> createSynchronizationEvent(final Object source, final AbstractEvent.Type eventType, final T resource) {
     final String cn = this.getClass().getName();
@@ -1350,7 +1369,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         this.firePropertyChange("populated", false, true);
       }
 
-      EventQueue<T> eventQueue = this.map.get(key);
+      EventQueue<T> eventQueue = this.eventQueueMap.get(key);
 
       final boolean eventQueueExisted = eventQueue != null;
 
@@ -1382,19 +1401,19 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
         if (eventQueueExisted) {
           returnValue = null;
           final boolean oldEmpty = this.isEmpty();
-          final Object oldEventQueue = this.map.remove(key);
+          final Object oldEventQueue = this.eventQueueMap.remove(key);
           assert oldEventQueue != null;
           this.firePropertyChange("empty", oldEmpty, this.isEmpty());
         } else {
           // Nothing to do; the queue we added the event to was
-          // created here, and was never added to our internal map, so
+          // created here, and was never added to our internal eventQueueMap, so
           // we're done.
         }
       } else if (!eventQueueExisted) {
         // We created the EventQueue we just added to; now we need to
         // store it.
         final boolean oldEmpty = this.isEmpty();
-        final Object oldEventQueue = this.map.put(key, eventQueue);
+        final Object oldEventQueue = this.eventQueueMap.put(key, eventQueue);
         assert oldEventQueue == null;
         this.firePropertyChange("empty", oldEmpty, this.isEmpty());
         // Notify anyone blocked on our empty state that we're no
@@ -1817,15 +1836,21 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
      * @param timeUnit the unit of time designated by the {@code
      * timeout} parameter; must not be {@code null}
      *
+     * @return {@code false} if the waiting time elapsed before the
+     * bound property named {@code synchronized} changed its value to
+     * {@code true}; {@code true} otherwise
+     *
      * @exception InterruptedException if the current {@link Thread}
      * is interrupted
      *
      * @exception NullPointerException if {@code timeUnit} is {@code
      * null}
+     *
+     * @see #propertyChange(PropertyChangeEvent)
      */
     @Blocking
-    public final void await(final long timeout, final TimeUnit timeUnit) throws InterruptedException {
-      this.latch.await(timeout, timeUnit);
+    public final boolean await(final long timeout, final TimeUnit timeUnit) throws InterruptedException {
+      return this.latch.await(timeout, timeUnit);
     }
     
   }
