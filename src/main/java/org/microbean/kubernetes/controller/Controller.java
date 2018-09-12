@@ -26,6 +26,7 @@ import java.util.Objects;
 
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -44,6 +45,7 @@ import io.fabric8.kubernetes.client.dsl.VersionWatchable;
 import net.jcip.annotations.Immutable;
 import net.jcip.annotations.ThreadSafe;
 
+import org.microbean.development.annotation.Blocking;
 import org.microbean.development.annotation.NonBlocking;
 
 /**
@@ -149,6 +151,8 @@ public class Controller<T extends HasMetadata> implements Closeable {
    */
   private final EventQueueCollection<T> eventQueueCollection;
 
+  private final EventQueueCollection.SynchronizationAwaitingPropertyChangeListener synchronizationAwaiter;
+
   /**
    * A {@link Consumer} of {@link EventQueue}s that processes {@link
    * Event}s produced, ultimately, by the {@link #reflector
@@ -156,7 +160,7 @@ public class Controller<T extends HasMetadata> implements Closeable {
    *
    * <p>This field is never {@code null}.</p>
    */
-  private final Consumer<? super EventQueue<? extends T>> siphon;
+  private final Consumer<? super EventQueue<? extends T>> eventQueueConsumer;
 
   
   /*
@@ -176,11 +180,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * VersionWatchable} that produces Kubernetes events; must not be
    * {@code null}
    *
-   * @param siphon the {@link Consumer} that will process each {@link
-   * EventQueue} as it becomes ready; must not be {@code null}
+   * @param eventQueueConsumer the {@link Consumer} that will process
+   * each {@link EventQueue} as it becomes ready; must not be {@code
+   * null}
    *
    * @exception NullPointerException if {@code operation} or {@code
-   * siphon} is {@code null}
+   * eventQueueConsumer} is {@code null}
    *
    * @see #Controller(Listable, ScheduledExecutorService, Duration,
    * Map, Consumer)
@@ -188,9 +193,11 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * @see #start()
    */
   @SuppressWarnings("rawtypes")
-  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Controller(final X operation,
-                                                                                                                               final Consumer<? super EventQueue<? extends T>> siphon) {
-    this(operation, null, null, null, siphon);
+  public <X extends Listable<? extends KubernetesResourceList>
+                    & VersionWatchable<? extends Closeable,
+                                                 Watcher<T>>> Controller(final X operation,
+                                                                         final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
+    this(operation, null, null, null, eventQueueConsumer);
   }
 
   /**
@@ -212,11 +219,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * if non-{@code null} <strong>will be synchronized on by this
    * class</strong> during retrieval and traversal operations
    *
-   * @param siphon the {@link Consumer} that will process each {@link
-   * EventQueue} as it becomes ready; must not be {@code null}
+   * @param eventQueueConsumer the {@link Consumer} that will process
+   * each {@link EventQueue} as it becomes ready; must not be {@code
+   * null}
    *
    * @exception NullPointerException if {@code operation} or {@code
-   * siphon} is {@code null}
+   * eventQueueConsumer} is {@code null}
    *
    * @see #Controller(Listable, ScheduledExecutorService, Duration,
    * Map, Consumer)
@@ -224,10 +232,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * @see #start()
    */
   @SuppressWarnings("rawtypes")
-  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Controller(final X operation,
-                                                                                                                               final Map<Object, T> knownObjects,
-                                                                                                                               final Consumer<? super EventQueue<? extends T>> siphon) {
-    this(operation, null, null, knownObjects, siphon);
+  public <X extends Listable<? extends KubernetesResourceList>
+                    & VersionWatchable<? extends Closeable,
+                                                 Watcher<T>>> Controller(final X operation,
+                                                                         final Map<Object, T> knownObjects,
+                                                                         final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
+    this(operation, null, null, knownObjects, eventQueueConsumer);
   }
 
   /**
@@ -247,11 +257,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * synchronization operation} and another; may be {@code null} in
    * which case no synchronization will occur
    *
-   * @param siphon the {@link Consumer} that will process each {@link
-   * EventQueue} as it becomes ready; must not be {@code null}
+   * @param eventQueueConsumer the {@link Consumer} that will process
+   * each {@link EventQueue} as it becomes ready; must not be {@code
+   * null}
    *
    * @exception NullPointerException if {@code operation} or {@code
-   * siphon} is {@code null}
+   * eventQueueConsumer} is {@code null}
    *
    * @see #Controller(Listable, ScheduledExecutorService, Duration,
    * Map, Consumer)
@@ -259,10 +270,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * @see #start()
    */
   @SuppressWarnings("rawtypes")
-  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Controller(final X operation,
-                                                                                                                               final Duration synchronizationInterval,
-                                                                                                                               final Consumer<? super EventQueue<? extends T>> siphon) {
-    this(operation, null, synchronizationInterval, null, siphon);
+  public <X extends Listable<? extends KubernetesResourceList>
+                    & VersionWatchable<? extends Closeable,
+                                                 Watcher<T>>> Controller(final X operation,
+                                                                         final Duration synchronizationInterval,
+                                                                         final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
+    this(operation, null, synchronizationInterval, null, eventQueueConsumer);
   }
 
   /**
@@ -289,11 +302,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * if non-{@code null} <strong>will be synchronized on by this
    * class</strong> during retrieval and traversal operations
    *
-   * @param siphon the {@link Consumer} that will process each {@link
-   * EventQueue} as it becomes ready; must not be {@code null}
+   * @param eventQueueConsumer the {@link Consumer} that will process
+   * each {@link EventQueue} as it becomes ready; must not be {@code
+   * null}
    *
    * @exception NullPointerException if {@code operation} or {@code
-   * siphon} is {@code null}
+   * eventQueueConsumer} is {@code null}
    *
    * @see #Controller(Listable, ScheduledExecutorService, Duration,
    * Map, Consumer)
@@ -301,11 +315,13 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * @see #start()
    */
   @SuppressWarnings("rawtypes")
-  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Controller(final X operation,
-                                                                                                                               final Duration synchronizationInterval,
-                                                                                                                               final Map<Object, T> knownObjects,
-                                                                                                                               final Consumer<? super EventQueue<? extends T>> siphon) {
-    this(operation, null, synchronizationInterval, knownObjects, siphon);
+  public <X extends Listable<? extends KubernetesResourceList>
+                    & VersionWatchable<? extends Closeable,
+                                                 Watcher<T>>> Controller(final X operation,
+                                                                         final Duration synchronizationInterval,
+                                                                         final Map<Object, T> knownObjects,
+                                                                         final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
+    this(operation, null, synchronizationInterval, knownObjects, eventQueueConsumer);
   }
 
   /**
@@ -337,21 +353,24 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * if non-{@code null} <strong>will be synchronized on by this
    * class</strong> during retrieval and traversal operations
    *
-   * @param siphon the {@link Consumer} that will process each {@link
-   * EventQueue} as it becomes ready; must not be {@code null}
+   * @param eventQueueConsumer the {@link Consumer} that will process
+   * each {@link EventQueue} as it becomes ready; must not be {@code
+   * null}
    *
    * @exception NullPointerException if {@code operation} or {@code
-   * siphon} is {@code null}
+   * eventQueueConsumer} is {@code null}
    *
    * @see #start()
    */
   @SuppressWarnings("rawtypes")
-  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Controller(final X operation,
-                                                                                                                               final ScheduledExecutorService synchronizationExecutorService,
-                                                                                                                               final Duration synchronizationInterval,
-                                                                                                                               final Map<Object, T> knownObjects,
-                                                                                                                               final Consumer<? super EventQueue<? extends T>> siphon) {
-    this(operation, synchronizationExecutorService, synchronizationInterval, null, knownObjects, siphon);
+  public <X extends Listable<? extends KubernetesResourceList>
+                    & VersionWatchable<? extends Closeable,
+                                                 Watcher<T>>> Controller(final X operation,
+                                                                         final ScheduledExecutorService synchronizationExecutorService,
+                                                                         final Duration synchronizationInterval,
+                                                                         final Map<Object, T> knownObjects,
+                                                                         final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
+    this(operation, synchronizationExecutorService, synchronizationInterval, null, knownObjects, eventQueueConsumer);
   }
 
   /**
@@ -390,21 +409,24 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * if non-{@code null} <strong>will be synchronized on by this
    * class</strong> during retrieval and traversal operations
    *
-   * @param siphon the {@link Consumer} that will process each {@link
-   * EventQueue} as it becomes ready; must not be {@code null}
+   * @param eventQueueConsumer the {@link Consumer} that will process
+   * each {@link EventQueue} as it becomes ready; must not be {@code
+   * null}
    *
    * @exception NullPointerException if {@code operation} or {@code
-   * siphon} is {@code null}
+   * eventQueueConsumer} is {@code null}
    *
    * @see #start()
    */
   @SuppressWarnings("rawtypes")
-  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Controller(final X operation,
-                                                                                                                               final ScheduledExecutorService synchronizationExecutorService,
-                                                                                                                               final Duration synchronizationInterval,
-                                                                                                                               final Function<? super Throwable, Boolean> errorHandler,
-                                                                                                                               final Map<Object, T> knownObjects,
-                                                                                                                               final Consumer<? super EventQueue<? extends T>> siphon) {
+  public <X extends Listable<? extends KubernetesResourceList>
+                    & VersionWatchable<? extends Closeable,
+                                                 Watcher<T>>> Controller(final X operation,
+                                                                         final ScheduledExecutorService synchronizationExecutorService,
+                                                                         final Duration synchronizationInterval,
+                                                                         final Function<? super Throwable, Boolean> errorHandler,
+                                                                         final Map<Object, T> knownObjects,
+                                                                         final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
     super();
     this.logger = this.createLogger();
     if (this.logger == null) {
@@ -413,10 +435,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
     final String cn = this.getClass().getName();
     final String mn = "<init>";
     if (this.logger.isLoggable(Level.FINER)) {
-      this.logger.entering(cn, mn, new Object[] { operation, synchronizationExecutorService, synchronizationInterval, errorHandler, knownObjects, siphon });
+      this.logger.entering(cn, mn, new Object[] { operation, synchronizationExecutorService, synchronizationInterval, errorHandler, knownObjects, eventQueueConsumer });
     }
-    this.siphon = Objects.requireNonNull(siphon);
+    this.eventQueueConsumer = Objects.requireNonNull(eventQueueConsumer);
     this.eventQueueCollection = new ControllerEventQueueCollection(knownObjects, errorHandler, 16, 0.75f);
+    this.synchronizationAwaiter = new EventQueueCollection.SynchronizationAwaitingPropertyChangeListener();
+    this.eventQueueCollection.addPropertyChangeListener(this.synchronizationAwaiter);
     this.reflector = new ControllerReflector(operation, synchronizationExecutorService, synchronizationInterval, errorHandler);
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
@@ -443,6 +467,43 @@ public class Controller<T extends HasMetadata> implements Closeable {
   }
 
   /**
+   * Blocks until the {@link EventQueueCollection} affiliated with
+   * this {@link Controller} {@linkplain
+   * EventQueueCollection#isSynchronized() has synchronized}.
+   *
+   * @exception InterruptedException if the current {@link Thread} was
+   * interrupted
+   */
+  @Blocking
+  public final void awaitEventCacheSynchronization() throws InterruptedException {
+    this.synchronizationAwaiter.await();
+  }
+
+  /**
+   * Blocks for the desired amount of time until the {@link
+   * EventQueueCollection} affiliated with this {@link Controller}
+   * {@linkplain EventQueueCollection#isSynchronized() has
+   * synchronized} or the amount of time has elapsed.
+   *
+   * @param timeout the amount of time to wait
+   *
+   * @param timeUnit the {@link TimeUnit} designating the amount of
+   * time to wait; must not be {@code null}
+   *
+   * @exception InterruptedException if the current {@link Thread} was
+   * interrupted
+   *
+   * @exception NullPointerException if {@code timeUnit} is {@code
+   * null}
+   *
+   * @see EventQueueCollection.SynchronizationAwaitingPropertyChangeListener
+   */
+  @Blocking
+  public final void awaitEventCacheSynchronization(final long timeout, final TimeUnit timeUnit) throws InterruptedException {
+    this.synchronizationAwaiter.await(timeout, timeUnit);
+  }
+  
+  /**
    * {@linkplain EventQueueCollection#start(Consumer) Starts the
    * embedded <code>EventQueueCollection</code> consumption machinery}
    * and then {@linkplain Reflector#start() starts the embedded
@@ -462,11 +523,18 @@ public class Controller<T extends HasMetadata> implements Closeable {
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.entering(cn, mn);
     }
+
+    // Start the consumer that is going to drain our associated
+    // EventQueueCollection.
     if (this.logger.isLoggable(Level.INFO)) {
-      this.logger.logp(Level.INFO, cn, mn, "Starting {0}", this.siphon);
+      this.logger.logp(Level.INFO, cn, mn, "Starting {0}", this.eventQueueConsumer);
     }
-    final Future<?> siphonTask = this.eventQueueCollection.start(this.siphon);
-    assert siphonTask != null;
+    final Future<?> eventQueueConsumerTask = this.eventQueueCollection.start(this.eventQueueConsumer);
+    assert eventQueueConsumerTask != null;
+
+    // Start the Reflector--the machinery that is going to connect to
+    // Kubernetes and "reflect" its (relevant) contents into the
+    // EventQueueCollection.
     if (this.logger.isLoggable(Level.INFO)) {
       this.logger.logp(Level.INFO, cn, mn, "Starting {0}", this.reflector);
     }
@@ -476,12 +544,15 @@ public class Controller<T extends HasMetadata> implements Closeable {
       try {
         // TODO: this is problematic, I think; reflector.close() means
         // that (potentially) it will never be able to restart it.
+        // The Go code appears to make some feints in the direction of
+        // restartability, and then just basically gives up.  I think
+        // we can do better here.
         this.reflector.close();
       } catch (final IOException | RuntimeException suppressMe) {
         exception.addSuppressed(suppressMe);
       }
-      siphonTask.cancel(true);
-      assert siphonTask.isDone();
+      eventQueueConsumerTask.cancel(true);
+      assert eventQueueConsumerTask.isDone();
       try {
         this.eventQueueCollection.close();
       } catch (final RuntimeException suppressMe) {
@@ -489,6 +560,7 @@ public class Controller<T extends HasMetadata> implements Closeable {
       }
       throw exception;
     }
+    
     if (this.logger.isLoggable(Level.FINER)) {
       this.logger.exiting(cn, mn);
     }

@@ -92,10 +92,10 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
 
 
   @GuardedBy("readLock && writeLock")
-  private final Collection<Pump<T>> distributors;
+  private final Collection<Pump<T>> pumps;
 
   @GuardedBy("readLock && writeLock")
-  private final Collection<Pump<T>> synchronizingDistributors;
+  private final Collection<Pump<T>> synchronizingPumps;
 
   private final Duration synchronizationInterval;
 
@@ -143,8 +143,8 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     final ReadWriteLock lock = new ReentrantReadWriteLock();
     this.readLock = lock.readLock();
     this.writeLock = lock.writeLock();
-    this.distributors = new ArrayList<>();
-    this.synchronizingDistributors = new ArrayList<>();
+    this.pumps = new ArrayList<>();
+    this.synchronizingPumps = new ArrayList<>();
     this.synchronizationInterval = synchronizationInterval;
   }
 
@@ -196,10 +196,10 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     if (consumer != null) {
       this.writeLock.lock();
       try {
-        final Pump<T> distributor = new Pump<>(this.synchronizationInterval, consumer, errorHandler);
-        distributor.start();
-        this.distributors.add(distributor);
-        this.synchronizingDistributors.add(distributor);
+        final Pump<T> pump = new Pump<>(this.synchronizationInterval, consumer, errorHandler);
+        pump.start();
+        this.pumps.add(pump);
+        this.synchronizingPumps.add(pump);
       } finally {
         this.writeLock.unlock();
       }
@@ -220,12 +220,12 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     if (consumer != null) {
       this.writeLock.lock();
       try {
-        final Iterator<? extends Pump<?>> iterator = this.distributors.iterator();
+        final Iterator<? extends Pump<?>> iterator = this.pumps.iterator();
         assert iterator != null;
         while (iterator.hasNext()) {
-          final Pump<?> distributor = iterator.next();
-          if (distributor != null && consumer.equals(distributor.getEventConsumer())) {
-            distributor.close();
+          final Pump<?> pump = iterator.next();
+          if (pump != null && consumer.equals(pump.getEventConsumer())) {
+            pump.close();
             iterator.remove();
             break;
           }
@@ -244,12 +244,12 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
   public final void close() {
     this.writeLock.lock();
     try {
-      this.distributors.stream()
-        .forEach(distributor -> {
-            distributor.close();
+      this.pumps.stream()
+        .forEach(pump -> {
+            pump.close();
           });
-      this.synchronizingDistributors.clear();
-      this.distributors.clear();
+      this.synchronizingPumps.clear();
+      this.pumps.clear();
     } finally {
       this.writeLock.unlock();
     }
@@ -276,15 +276,15 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
     boolean returnValue = false;
     this.writeLock.lock();
     try {
-      this.synchronizingDistributors.clear();
+      this.synchronizingPumps.clear();
       final Instant now = Instant.now();
-      this.distributors.stream()
-        .filter(distributor -> distributor.shouldSynchronize(now))
-        .forEach(distributor -> {
-            this.synchronizingDistributors.add(distributor);
-            distributor.determineNextSynchronizationInterval(now);
+      this.pumps.stream()
+        .filter(pump -> pump.shouldSynchronize(now))
+        .forEach(pump -> {
+            this.synchronizingPumps.add(pump);
+            pump.determineNextSynchronizationInterval(now);
           });
-      returnValue = !this.synchronizingDistributors.isEmpty();
+      returnValue = !this.synchronizingPumps.isEmpty();
     } finally {
       this.writeLock.unlock();
     }
@@ -320,9 +320,9 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
   private final void accept(final SynchronizationEvent<? extends T> event) {
     this.readLock.lock();
     try {
-      if (!this.synchronizingDistributors.isEmpty()) {
-        this.synchronizingDistributors.stream()
-          .forEach(distributor -> distributor.accept(event));
+      if (!this.synchronizingPumps.isEmpty()) {
+        this.synchronizingPumps.stream()
+          .forEach(pump -> pump.accept(event));
       }
     } finally {
       this.readLock.unlock();
@@ -332,9 +332,9 @@ public final class EventDistributor<T extends HasMetadata> extends ResourceTrack
   private final void accept(final Event<? extends T> event) {
     this.readLock.lock();
     try {
-      if (!this.distributors.isEmpty()) {
-        this.distributors.stream()
-          .forEach(distributor -> distributor.accept(event));
+      if (!this.pumps.isEmpty()) {
+        this.pumps.stream()
+          .forEach(pump -> pump.accept(event));
       }
     } finally {
       this.readLock.unlock();

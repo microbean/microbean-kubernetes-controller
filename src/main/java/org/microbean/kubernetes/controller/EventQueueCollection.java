@@ -32,6 +32,7 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
 
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
@@ -63,6 +64,13 @@ import org.microbean.development.annotation.NonBlocking;
  *
  * <p>This class is safe for concurrent use by multiple {@link
  * Thread}s.</p>
+ *
+ * <h2>Design Notes</h2>
+ *
+ * <p>This class loosely models the <a
+ * href="https://github.com/kubernetes/client-go/blob/37c3c02ec96533daec0dbda1f39a6b1d68505c79/tools/cache/delta_fifo.go#L96">{@code
+ * DeltaFIFO}</a> type in the Kubernetes Go client {@code tools/cache}
+ * package.</p>
  *
  * @param <T> a type of Kubernetes resource
  *
@@ -622,13 +630,17 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
 
     if (!this.populated) {
       this.populated = true;
-      this.firePropertyChange("populated", false, true);
       assert size >= 0;
       assert queuedDeletions >= 0;
       final int oldInitialPopulationCount = this.initialPopulationCount;
       this.initialPopulationCount = size + queuedDeletions;
+      this.firePropertyChange("populated", false, true);
       this.firePropertyChange("initialPopulationCount", oldInitialPopulationCount, this.initialPopulationCount);
       if (this.initialPopulationCount == 0) {
+        // We know that we are now synchronized because the definition
+        // of being synchronized is to have an initialPopulationCount
+        // of 0 and a populated status of true.
+        assert this.isSynchronized();
         this.firePropertyChange("synchronized", oldSynchronized, true);
       }
     }
@@ -722,42 +734,61 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * <p>Invoking this method does not block the calling {@link
    * Thread}.</p>
    *
-   * @param siphon the {@link Consumer} that will process each {@link
-   * EventQueue} as it becomes ready; must not be {@code null}
+   * <p>The non-{@code null} {@link Future} that is returned will not
+   * return {@code true} from its {@linkplain Future#isDone()} method
+   * unless {@linkplain Future#cancel(boolean) it has been cancelled}
+   * or an exception has occurred.  That is, the task represented by
+   * the returned {@link Future} is never-ending under normal
+   * circumstances.</p>
+   *
+   * @param eventQueueConsumer the {@link Consumer} that will process
+   * each {@link EventQueue} as it becomes ready; must not be {@code
+   * null}
    *
    * @return a {@link Future} representing the task that is feeding
    * {@link EventQueue}s to the supplied {@link Consumer}; never
-   * {@code null}
+   * {@code null}; suitable only for {@linkplain
+   * Future#cancel(boolean) cancellation}
    *
-   * @exception NullPointerException if {@code siphon} is {@code null}
+   * @exception NullPointerException if {@code eventQueueConsumer} is
+   * {@code null}
    */
   @NonBlocking
-  public final Future<?> start(final Consumer<? super EventQueue<? extends T>> siphon) {
+  public final Future<?> start(final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
     final String cn = this.getClass().getName();
     final String mn = "start";
     if (this.logger.isLoggable(Level.FINER)) {
-      this.logger.entering(cn, mn, siphon);
+      this.logger.entering(cn, mn, eventQueueConsumer);
     }
 
-    Objects.requireNonNull(siphon);
+    Objects.requireNonNull(eventQueueConsumer);
 
     final Future<?> returnValue;
 
     synchronized (this) {
+      
       if (this.consumerExecutor == null) {
-        this.consumerExecutor = this.createScheduledThreadPoolExecutor();
+        this.consumerExecutor = createScheduledThreadPoolExecutor();
         assert this.consumerExecutor != null : "createScheduledThreadPoolExecutor() == null";
       }
 
       if (this.eventQueueConsumptionTask == null) {
+        // This task is scheduled, rather than simply executed, so
+        // that if it terminates exceptionally it will be restarted
+        // after one second.  The task could have been written to do
+        // this "scheduling" itself (i.e. it could restart a loop
+        // itself in the presence of an exception) but we follow the
+        // Go code idiom here.
         this.eventQueueConsumptionTask =
-          this.consumerExecutor.scheduleWithFixedDelay(this.createEventQueueConsumptionTask(siphon),
+          this.consumerExecutor.scheduleWithFixedDelay(this.createEventQueueConsumptionTask(eventQueueConsumer),
                                                        0L,
                                                        1L,
                                                        TimeUnit.SECONDS);
       }
       assert this.eventQueueConsumptionTask != null;
+      
       returnValue = this.eventQueueConsumptionTask;
+
     }
 
     if (this.logger.isLoggable(Level.FINER)) {
@@ -766,7 +797,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
     return returnValue;
   }
 
-  private final ScheduledThreadPoolExecutor createScheduledThreadPoolExecutor() {
+  private static final ScheduledThreadPoolExecutor createScheduledThreadPoolExecutor() {
     final ScheduledThreadPoolExecutor returnValue = new ScheduledThreadPoolExecutor(1);
     returnValue.setRemoveOnCancelPolicy(true);
     return returnValue;
@@ -853,20 +884,21 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * "body" of a never-ending task that {@linkplain #get() removes the
    * eldest <code>EventQueue</code>} from this {@link
    * EventQueueCollection} and {@linkplain Consumer#accept(Object)
-   * supplies it to the supplied <code>siphon</code>}.
+   * supplies it to the supplied <code>eventQueueConsumer</code>}.
    *
    * <p>This method never returns {@code null}.</p>
    *
-   * @param siphon the {@link Consumer} that will act upon the eldest
-   * {@link EventQueue} in this {@link EventQueueCollection}; must not
-   * be {@code null}
+   * @param eventQueueConsumer the {@link Consumer} that will act upon
+   * the eldest {@link EventQueue} in this {@link
+   * EventQueueCollection}; must not be {@code null}
    *
    * @return a new {@link Runnable}; never {@code null}
    *
-   * @exception NullPointerException if {@code siphon} is {@code null}
+   * @exception NullPointerException if {@code eventQueueConsumer} is
+   * {@code null}
    */
-  private final Runnable createEventQueueConsumptionTask(final Consumer<? super EventQueue<? extends T>> siphon) {
-    Objects.requireNonNull(siphon);
+  private final Runnable createEventQueueConsumptionTask(final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
+    Objects.requireNonNull(eventQueueConsumer);
     final Runnable returnValue = () -> {
       // This Runnable loosely models the processLoop() function in
       // https://github.com/kubernetes/kubernetes/blob/v1.9.0/staging/src/k8s.io/client-go/tools/cache/controller.go#L139-L161.
@@ -880,7 +912,7 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
             Throwable unhandledThrowable = null;
             synchronized (eventQueue) {
               try {
-                siphon.accept(eventQueue);
+                eventQueueConsumer.accept(eventQueue);
               } catch (final TransientException transientException) {
                 this.map.putIfAbsent(eventQueue.getKey(), eventQueue);
               } catch (final Throwable e) {
@@ -898,11 +930,22 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
             }
           }
         }
-      } catch (final RuntimeException throwMe) {
+      } catch (final RuntimeException unhandledRuntimeException) {
+        // This RuntimeException was almost certainly supplied to our
+        // error handler, who had a chance to process it, but who
+        // rejected it for one reason or another.  As a last attempt
+        // to make sure it is noticed, we don't just throw this
+        // RuntimeException but also log it because it is very easy
+        // for a Runnable submitted to an ExecutorService to have its
+        // RuntimeExceptions disappear into the ether.
         if (logger.isLoggable(Level.SEVERE)) {
-          logger.logp(Level.SEVERE, this.getClass().getName(), "<eventQueueConsumptionTask>", throwMe.getMessage(), throwMe);
+          logger.logp(Level.SEVERE,
+                      this.getClass().getName(),
+                      "<eventQueueConsumptionTask>",
+                      unhandledRuntimeException.getMessage(),
+                      unhandledRuntimeException);
         }
-        throw throwMe;
+        throw unhandledRuntimeException;
       }
     };
     return returnValue;
@@ -1659,6 +1702,132 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       super(message, cause);
     }
 
+  }
+
+
+  /**
+   * A {@link PropertyChangeListener} specifically designed for
+   * reacting to a change in the synchronization status of an {@link
+   * EventQueueCollection} as represented by the firing of its {@code
+   * synchronized} <a
+   * href="https://docs.oracle.com/javase/tutorial/javabeans/writing/properties.html#bound">bound
+   * Java Beans property</a>.
+   *
+   * @author <a href="https://about.me/lairdnelson"
+   * target="_parent">Laird Nelson</a>
+   *
+   * @see EventQueueCollection#addPropertyChangeListener(String,
+   * PropertyChangeListener)
+   *
+   * @see #await()
+   *
+   * @see #propertyChange(PropertyChangeEvent)
+   */
+  public static final class SynchronizationAwaitingPropertyChangeListener implements PropertyChangeListener {
+
+
+    /*
+     * Instance fields.
+     */
+
+
+    /**
+     * A {@link CountDownLatch} whose {@link
+     * CountDownLatch#countDown()} method is invoked in certain cases
+     * by the {@link #propertyChange(PropertyChangeEvent)} method.
+     *
+     * <p>This field is never {@code null}.</p>
+     *
+     * @see #propertyChange(PropertyChangeEvent)
+     */
+    private final CountDownLatch latch;
+
+
+    /*
+     * Constructors.
+     */
+    
+
+    /**
+     * Creates a new {@link
+     * SynchronizationAwaitingPropertyChangeListener}.
+     */
+    public SynchronizationAwaitingPropertyChangeListener() {
+      super();
+      this.latch = new CountDownLatch(1);
+    }
+
+
+    /*
+     * Instance methods.
+     */
+    
+
+    /**
+     * If the supplied {@link PropertyChangeEvent} is non-{@code
+     * null}, has a {@linkplain PropertyChangeEvent#getSource()
+     * source} that is an instance of {@link EventQueueCollection},
+     * has a {@linkplain PropertyChangeEvent#getPropertyName()
+     * property name} equal to {@code synchronized} and a {@linkplain
+     * PropertyChangeEvent#getNewValue() new value} equal to {@link
+     * Boolean#TRUE}, then it is guaranteed that any calls currently
+     * blocked on the {@link #await()} or {@link #await(long,
+     * TimeUnit)} methods will unblock, and subsequent invocations of
+     * those methods will never block again.
+     *
+     * @param event a {@link PropertyChangeEvent} fired by an {@link
+     * EventQueueCollection}; may be {@code null} in which case no
+     * action will be taken
+     *
+     * @see EventQueueCollection#addPropertyChangeListener(String,
+     * PropertyChangeListener)
+     *
+     * @see EventQueueCollection#isSynchronized()
+     */
+    @Override
+    public final void propertyChange(final PropertyChangeEvent event) {
+      if (event != null &&
+          event.getSource() instanceof EventQueueCollection &&
+          "synchronized".equals(event.getPropertyName()) &&
+          Boolean.TRUE.equals(event.getNewValue())) {
+        this.latch.countDown();
+      }
+    }
+
+    /**
+     * Blocks until the conditions described in the documentation of
+     * the {@link #propertyChange(PropertyChangeEvent)} method hold
+     * true.
+     *
+     * @exception InterruptedException if the current {@link Thread}
+     * is interrupted
+     */
+    @Blocking
+    public final void await() throws InterruptedException {
+      this.latch.await();
+    }
+
+    /**
+     * Blocks until the conditions described in the documentation of
+     * the {@link #propertyChange(PropertyChangeEvent)} method hold
+     * true or the indicated time has passed.
+     *
+     * @param timeout the number of units of time to wait for
+     *
+     * @param timeUnit the unit of time designated by the {@code
+     * timeout} parameter; must not be {@code null}
+     *
+     * @exception InterruptedException if the current {@link Thread}
+     * is interrupted
+     *
+     * @exception NullPointerException if {@code timeUnit} is {@code
+     * null}
+     */
+    @Blocking
+    public final void await(final long timeout, final TimeUnit timeUnit) throws InterruptedException {
+      this.latch.await(timeout, timeUnit);
+    }
+    
   }
 
 }

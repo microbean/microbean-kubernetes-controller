@@ -136,6 +136,13 @@ public class Reflector<T extends HasMetadata> implements Closeable {
   @GuardedBy("this")
   private Closeable watch;
 
+  /**
+   * An {@link EventCache} (often an {@link EventQueueCollection})
+   * whose contents will be added to to reflect the current state of
+   * Kubernetes.
+   *
+   * <p>This field is never {@code null}.</p>
+   */
   @GuardedBy("itself")
   private final EventCache<T> eventCache;
 
@@ -604,7 +611,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
       
         // If somehow we got called while a watch already exists, then
         // close the old watch (we'll replace it).  Note that,
-        // critically, the onClose() method of our watch handler, sets
+        // critically, the onClose() method of our watch handler sets
         // this reference to null, so if the watch is in the process
         // of being closed, this little block won't be executed.
         if (this.watch != null) {
@@ -633,7 +640,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
         } else {
           replacementItems = Collections.unmodifiableCollection(new ArrayList<>(items));
         }
-        synchronized (eventCache) {
+        synchronized (this.eventCache) {
           this.eventCache.replace(replacementItems, resourceVersion);
         }
         
