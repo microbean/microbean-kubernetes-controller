@@ -456,6 +456,9 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    * incomingResources} parameter indicates that it has been deleted
    * from Kubernetes.</p>
    *
+   * <p>(No {@link Event}s of type {@link
+   * AbstractEvent.Type#MODIFICATION} are added by this method.)</p>
+   *
    * <p>{@link EventQueue}s managed by this {@link
    * EventQueueCollection} that have not yet {@linkplain
    * #start(Consumer) been processed} are not removed by this
@@ -501,7 +504,10 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
       this.logger.entering(cn, mn, new Object[] { incomingResourcesString, resourceVersion });
     }
 
+    // Keep track of our old synchronization state; we'll fire a
+    // JavaBeans bound property at the bottom of this method.
     final boolean oldSynchronized = this.isSynchronized();
+    
     final int size;
     final Set<Object> replacementKeys;
 
@@ -627,10 +633,10 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
                     throw new IllegalStateException("createEvent() == null");
                   }
                   event.setKey(knownKey);
-                  // The final boolean parameter indicates that we
-                  // don't want our populated status to be set by this
-                  // call.  We do this at the bottom of this method
-                  // ourselves.
+                  // The final boolean parameter (false) indicates
+                  // that we don't want our populated status to be set
+                  // by this call.  We do this at the bottom of this
+                  // method ourselves.
                   this.add(event, false);
                   queuedDeletions++;
                 }
@@ -758,7 +764,11 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    *
    * @param eventQueueConsumer the {@link Consumer} that will process
    * each {@link EventQueue} as it becomes ready; must not be {@code
-   * null}
+   * null}.  If this {@link Consumer}'s {@link
+   * Consumer#accept(Object)} method throws a {@link
+   * TransientException}, then the {@link EventQueue} that was
+   * supplied to it will be re-enqueued and at some point in the
+   * future this {@link Consumer} will have a chance to re-process it.
    *
    * @return a {@link Future} representing the task that is feeding
    * {@link EventQueue}s to the supplied {@link Consumer}; never
@@ -940,27 +950,31 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
               } else if (unhandledThrowable instanceof Error) {
                 throw (Error)unhandledThrowable;
               } else {
-                assert !(unhandledThrowable instanceof Exception);
+                assert !(unhandledThrowable instanceof Exception) : "unhandledThrowable instanceof Exception: " + unhandledThrowable;
               }
             }
           }
         }
-      } catch (final RuntimeException unhandledRuntimeException) {
-        // This RuntimeException was almost certainly supplied to our
-        // error handler, who had a chance to process it, but who
-        // rejected it for one reason or another.  As a last attempt
-        // to make sure it is noticed, we don't just throw this
-        // RuntimeException but also log it because it is very easy
-        // for a Runnable submitted to an ExecutorService to have its
-        // RuntimeExceptions disappear into the ether.
+      } catch (final RuntimeException | Error unhandledRuntimeExceptionOrError) {
+        // This RuntimeException or Error was almost certainly
+        // supplied to our error handler, who had a chance to process
+        // it, but who rejected it for one reason or another.  As a
+        // last attempt to make sure it is noticed, we don't just
+        // throw this RuntimeException or Error but also log it
+        // because it is very easy for a Runnable submitted to an
+        // ExecutorService to have its RuntimeExceptions and Errors
+        // disappear into the ether.  Yes, this is a case where we're
+        // both logging and throwing, but the redundancy in this case
+        // is worth it: if an error handler failed, then things are
+        // really bad.
         if (logger.isLoggable(Level.SEVERE)) {
           logger.logp(Level.SEVERE,
                       this.getClass().getName(),
                       "<eventQueueConsumptionTask>",
-                      unhandledRuntimeException.getMessage(),
-                      unhandledRuntimeException);
+                      unhandledRuntimeExceptionOrError.getMessage(),
+                      unhandledRuntimeExceptionOrError);
         }
-        throw unhandledRuntimeException;
+        throw unhandledRuntimeExceptionOrError;
       }
     };
     return returnValue;
@@ -1656,6 +1670,8 @@ public class EventQueueCollection<T extends HasMetadata> implements EventCache<T
    *
    * @author <a href="https://about.me/lairdnelson"
    * target="_parent">Laird Nelson</a>
+   *
+   * @see EventQueueCollection#start(Consumer)
    *
    * @see EventQueueCollection
    */

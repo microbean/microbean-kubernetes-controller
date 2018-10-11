@@ -32,4 +32,8 @@
  *
  * @see org.microbean.kubernetes.controller.Reflector
  */
+@org.microbean.development.annotation.License(
+  name = "Apache License 2.0",
+  uri = "https://www.apache.org/licenses/LICENSE-2.0"
+)
 package org.microbean.kubernetes.controller;

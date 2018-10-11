@@ -37,6 +37,7 @@ import java.util.logging.Logger;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
 
+import io.fabric8.kubernetes.client.KubernetesClientException; // for javadoc only
 import io.fabric8.kubernetes.client.Watcher;
 
 import io.fabric8.kubernetes.client.dsl.Listable;
@@ -515,6 +516,9 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * @exception IOException if {@link Reflector#start()} throws an
    * {@link IOException}
    *
+   * @exception KubernetesClientException if the {@linkplain Reflector
+   * embedded <code>Reflector</code>} could not be started
+   *
    * @see EventQueueCollection#start(Consumer)
    *
    * @see Reflector#start()
@@ -543,7 +547,7 @@ public class Controller<T extends HasMetadata> implements Closeable {
     }
     try {
       this.reflector.start();
-    } catch (final IOException | RuntimeException exception) {
+    } catch (final IOException | RuntimeException | Error reflectorStartFailure) {
       try {
         // TODO: this is problematic, I think; reflector.close() means
         // that (potentially) it will never be able to restart it.
@@ -551,17 +555,17 @@ public class Controller<T extends HasMetadata> implements Closeable {
         // restartability, and then just basically gives up.  I think
         // we can do better here.
         this.reflector.close();
-      } catch (final IOException | RuntimeException suppressMe) {
-        exception.addSuppressed(suppressMe);
+      } catch (final Throwable suppressMe) {
+        reflectorStartFailure.addSuppressed(suppressMe);
       }
       eventQueueConsumerTask.cancel(true);
       assert eventQueueConsumerTask.isDone();
       try {
         this.eventQueueCollection.close();
-      } catch (final RuntimeException suppressMe) {
-        exception.addSuppressed(suppressMe);
+      } catch (final Throwable suppressMe) {
+        reflectorStartFailure.addSuppressed(suppressMe);
       }
-      throw exception;
+      throw reflectorStartFailure;
     }
     
     if (this.logger.isLoggable(Level.FINER)) {
@@ -605,7 +609,7 @@ public class Controller<T extends HasMetadata> implements Closeable {
         this.logger.logp(Level.INFO, cn, mn, "Closing {0}", this.eventQueueCollection);
       }
       this.eventQueueCollection.close();
-    } catch (final RuntimeException runtimeException) {
+    } catch (final RuntimeException | Error runtimeException) {
       if (throwMe == null) {
         throw runtimeException;
       }
@@ -848,12 +852,26 @@ public class Controller<T extends HasMetadata> implements Closeable {
      * Instance methods.
      */
     
-    
+
+    /**
+     * Invokes the {@link Controller#shouldSynchronize()} method and
+     * returns its result.
+     *
+     * @return the result of invoking the {@link
+     * Controller#shouldSynchronize()} method
+     *
+     * @see Controller#shouldSynchronize()
+     */
     @Override
     protected final boolean shouldSynchronize() {
       return Controller.this.shouldSynchronize();
     }
-
+    
+    /**
+     * Invokes the {@link Controller#onClose()} method.
+     *
+     * @see Controller#onClose()
+     */
     @Override
     protected final void onClose() {
       Controller.this.onClose();
