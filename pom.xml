@@ -1,15 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>org.microbean</groupId>
   <artifactId>microbean-kubernetes-controller</artifactId>
-  <version>0.2.3-SNAPSHOT</version>
+  <version>0.3.0-SNAPSHOT</version>
 
   <parent>
     <groupId>org.microbean</groupId>
     <artifactId>microbean-pluginmanagement-pom</artifactId>
-    <version>9</version>
+    <version>17</version>
     <relativePath/>
   </parent>
 
@@ -36,56 +39,56 @@
       <dependency>
         <groupId>com.fasterxml.jackson.core</groupId>
         <artifactId>jackson-annotations</artifactId>
-        <version>2.9.8</version>
+        <version>2.12.1</version>
         <type>jar</type>
       </dependency>
 
       <dependency>
         <groupId>com.fasterxml.jackson.core</groupId>
         <artifactId>jackson-core</artifactId>
-        <version>2.9.8</version>
+        <version>2.12.1</version>
         <type>jar</type>
       </dependency>
-      
+
       <dependency>
         <groupId>com.fasterxml.jackson.core</groupId>
         <artifactId>jackson-databind</artifactId>
-        <version>2.9.8</version>
+        <version>2.12.1</version>
         <type>jar</type>
       </dependency>
 
       <dependency>
         <groupId>com.fasterxml.jackson.dataformat</groupId>
         <artifactId>jackson-dataformat-yaml</artifactId>
-        <version>2.9.8</version>
+        <version>2.12.1</version>
         <type>jar</type>
       </dependency>
-      
+
       <dependency>
         <groupId>com.fasterxml.jackson.module</groupId>
         <artifactId>jackson-module-jaxb-annotations</artifactId>
-        <version>2.9.8</version>
+        <version>2.12.1</version>
         <type>jar</type>
       </dependency>
 
       <dependency>
         <groupId>com.squareup.okhttp3</groupId>
         <artifactId>logging-interceptor</artifactId>
-        <version>3.12.1</version>
+        <version>4.9.0</version>
         <type>jar</type>
       </dependency>
 
       <dependency>
         <groupId>com.squareup.okhttp3</groupId>
         <artifactId>okhttp</artifactId>
-        <version>3.12.1</version>
+        <version>4.9.0</version>
         <type>jar</type>
       </dependency>
-      
+
       <dependency>
         <groupId>io.fabric8</groupId>
         <artifactId>kubernetes-client</artifactId>
-        <version>4.1.1</version>
+        <version>4.11.1</version>
         <type>jar</type>
         <exclusions>
           <exclusion>
@@ -98,7 +101,7 @@
       <dependency>
         <groupId>io.fabric8</groupId>
         <artifactId>kubernetes-model</artifactId>
-        <version>4.1.1</version>
+        <version>4.11.1</version>
         <type>jar</type>
         <exclusions>
           <exclusion>
@@ -107,7 +110,7 @@
           </exclusion>
         </exclusions>
       </dependency>
-      
+
       <dependency>
         <groupId>net.jcip</groupId>
         <artifactId>jcip-annotations</artifactId>
@@ -121,21 +124,21 @@
         <version>0.2.3</version>
         <type>jar</type>
       </dependency>
-      
+
       <dependency>
         <groupId>org.slf4j</groupId>
         <artifactId>slf4j-simple</artifactId>
-        <version>1.7.25</version>
+        <version>1.7.30</version>
         <type>jar</type>
       </dependency>
 
       <dependency>
         <groupId>org.yaml</groupId>
         <artifactId>snakeyaml</artifactId>
-        <version>1.23</version>
+        <version>1.27</version>
         <type>jar</type>
       </dependency>
-      
+
     </dependencies>
   </dependencyManagement>
 
@@ -144,7 +147,7 @@
 
     <!-- Test-scoped dependencies. -->
 
-    
+
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
@@ -159,10 +162,10 @@
       <scope>test</scope>
     </dependency>
 
-    
+
     <!-- Compile-scoped dependencies. -->
 
-    
+
     <dependency>
       <groupId>io.fabric8</groupId>
       <artifactId>kubernetes-client</artifactId>
@@ -183,46 +186,32 @@
       <type>jar</type>
       <scope>compile</scope>
     </dependency>
-    
+
     <dependency>
       <groupId>org.microbean</groupId>
       <artifactId>microbean-development-annotations</artifactId>
       <type>jar</type>
       <scope>compile</scope>
     </dependency>
-    
+
   </dependencies>
-  
+
   <build>
 
     <testResources />
-    
+
     <pluginManagement>
       <plugins>
 
         <plugin>
-          <artifactId>maven-javadoc-plugin</artifactId>
-          <configuration>
-            <additionalJOptions combine.children="append">
-              <additionalJOption>-J-Dhttp.agent=maven-javadoc-plugin</additionalJOption>
-            </additionalJOptions>
-          </configuration>
+          <groupId>com.github.spotbugs</groupId>
+          <artifactId>spotbugs-maven-plugin</artifactId>
+          <version>4.2.0</version>
         </plugin>
-        
-        <plugin>
-          <groupId>org.owasp</groupId>
-          <artifactId>dependency-check-maven</artifactId>
-          <version>4.0.2</version>
-          <configuration>
-            <failOnError>false</failOnError>
-            <name>National Vulnerability Database Report</name>
-            <suppressionFile>${basedir}/src/dependency-check/suppressions.xml</suppressionFile>
-          </configuration>
-        </plugin>
-        
+
       </plugins>
     </pluginManagement>
-    
+
     <plugins>
 
       <plugin>
@@ -235,7 +224,7 @@
           </systemPropertyVariables>
         </configuration>
       </plugin>
-      
+
       <plugin>
         <groupId>com.github.github</groupId>
         <artifactId>site-maven-plugin</artifactId>
@@ -245,9 +234,7 @@
   </build>
 
   <properties>
-    
-    <!-- dependency-check-plugin properties; see -->
-    
+
     <!-- maven-javadoc-plugin properties; see https://maven.apache.org/plugins/maven-javadoc-plugin/javadoc-mojo.html -->
     <links>https://microbean.github.io/microbean-kubernetes/apidocs/,https://microbean.github.io/microbean-development-annotations/apidocs/,http://jcip.net/annotations/doc/,https://static.javadoc.io/io.fabric8/kubernetes-client/4.1.1,https://static.javadoc.io/io.fabric8/kubernetes-model/4.1.1,https://square.github.io/okhttp/3.x/okhttp/</links>
 
@@ -269,10 +256,6 @@
             </reports>
           </reportSet>
         </reportSets>
-      </plugin>
-      <plugin>
-        <groupId>org.owasp</groupId>
-        <artifactId>dependency-check-maven</artifactId>
       </plugin>
     </plugins>
   </reporting>
