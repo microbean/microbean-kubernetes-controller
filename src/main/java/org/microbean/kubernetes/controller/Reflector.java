@@ -16,64 +16,31 @@
  */
 package org.microbean.kubernetes.controller;
 
+import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.api.model.KubernetesResourceList;
+import io.fabric8.kubernetes.api.model.ListMeta;
+import io.fabric8.kubernetes.api.model.ObjectMeta;
+import io.fabric8.kubernetes.client.*;
+import io.fabric8.kubernetes.client.dsl.Listable;
+import io.fabric8.kubernetes.client.dsl.Versionable;
+import io.fabric8.kubernetes.client.dsl.WatchAndWaitable;
+import net.jcip.annotations.GuardedBy;
+import net.jcip.annotations.ThreadSafe;
+import org.microbean.development.annotation.Issue;
+import org.microbean.development.annotation.NonBlocking;
+
 import java.io.Closeable;
 import java.io.IOException;
-
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-
 import java.time.Duration;
-
 import java.time.temporal.ChronoUnit;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Objects;
-import java.util.Map;
-
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-
+import java.util.concurrent.*;
 import java.util.function.Function;
-
 import java.util.logging.Level;
 import java.util.logging.Logger;
-
-import io.fabric8.kubernetes.client.DefaultKubernetesClient; // for javadoc only
-import io.fabric8.kubernetes.client.KubernetesClientException;
-import io.fabric8.kubernetes.client.Watch; // for javadoc only
-import io.fabric8.kubernetes.client.Watcher;
-
-import io.fabric8.kubernetes.client.dsl.base.BaseOperation;
-import io.fabric8.kubernetes.client.dsl.base.OperationSupport;
-
-import io.fabric8.kubernetes.client.dsl.Listable;
-import io.fabric8.kubernetes.client.dsl.Versionable;
-import io.fabric8.kubernetes.client.dsl.VersionWatchable;
-import io.fabric8.kubernetes.client.dsl.Watchable;
-
-import io.fabric8.kubernetes.client.dsl.internal.CustomResourceOperationsImpl;
-
-import io.fabric8.kubernetes.api.model.HasMetadata;
-import io.fabric8.kubernetes.api.model.ObjectMeta;
-import io.fabric8.kubernetes.api.model.KubernetesResourceList;
-import io.fabric8.kubernetes.api.model.ListMeta;
-
-import net.jcip.annotations.GuardedBy;
-import net.jcip.annotations.ThreadSafe;
-
-import okhttp3.OkHttpClient;
-
-import org.microbean.development.annotation.Hack;
-import org.microbean.development.annotation.Issue;
-import org.microbean.development.annotation.NonBlocking;
 
 /**
  * A pump of sorts that continuously "pulls" logical events out of
@@ -103,26 +70,24 @@ import org.microbean.development.annotation.NonBlocking;
 @ThreadSafe
 public class Reflector<T extends HasMetadata> implements Closeable {
 
-
   /*
    * Instance fields.
    */
 
-
   /**
    * The operation that was supplied at construction time.
    *
-   * <p>This field is never {@code null}.</p>
+   * <p>This field is never {@code null}.
    *
    * <p>It is guaranteed that the value of this field may be
    * assignable to a reference of type {@link Listable Listable&lt;?
    * extends KubernetesResourceList&gt;} or to a reference of type
-   * {@link VersionWatchable VersionWatchable&lt;? extends Closeable,
+   * {@link WatchAndWaitable&lt;? extends Closeable,
    * Watcher&lt;T&gt;&gt;}.</p>
    *
    * @see Listable
    *
-   * @see VersionWatchable
+   * @see WatchAndWaitable
    */
   private final Object operation;
 
@@ -236,12 +201,12 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * Creates a new {@link Reflector}.
    *
    * @param <X> a type that is both an appropriate kind of {@link
-   * Listable} and {@link VersionWatchable}, such as the kind of
+   * Listable} and {@link WatchAndWaitable}, such as the kind of
    * operation returned by {@link
    * DefaultKubernetesClient#configMaps()} and the like
    *
    * @param operation a {@link Listable} and a {@link
-   * VersionWatchable} that can report information from a Kubernetes
+   * WatchAndWaitable} that can report information from a Kubernetes
    * cluster; must not be {@code null}
    *
    * @param eventCache an {@link EventCache} <strong>that will be
@@ -260,7 +225,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * @see #start()
    */
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
-  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
+  public <X extends Listable<? extends KubernetesResourceList> & Versionable<WatchAndWaitable<T>>> Reflector(final X operation,
                                                                                                                               final EventCache<T> eventCache) {
     this(operation, eventCache, null, null, null);
   }
@@ -269,12 +234,12 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * Creates a new {@link Reflector}.
    *
    * @param <X> a type that is both an appropriate kind of {@link
-   * Listable} and {@link VersionWatchable}, such as the kind of
+   * Listable} and {@link WatchAndWaitable}, such as the kind of
    * operation returned by {@link
    * DefaultKubernetesClient#configMaps()} and the like
    *
    * @param operation a {@link Listable} and a {@link
-   * VersionWatchable} that can report information from a Kubernetes
+   * WatchAndWaitable} that can report information from a Kubernetes
    * cluster; must not be {@code null}
    *
    * @param eventCache an {@link EventCache} <strong>that will be
@@ -299,9 +264,9 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * @see #start()
    */
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
-  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
-                                                                                                                              final EventCache<T> eventCache,
-                                                                                                                              final Duration synchronizationInterval) {
+  public <X extends Listable<? extends KubernetesResourceList> & Versionable<WatchAndWaitable<T>>> Reflector(final X operation,
+                                                                                                             final EventCache<T> eventCache,
+                                                                                                             final Duration synchronizationInterval) {
     this(operation, eventCache, null, synchronizationInterval, null);
   }
 
@@ -309,12 +274,12 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * Creates a new {@link Reflector}.
    *
    * @param <X> a type that is both an appropriate kind of {@link
-   * Listable} and {@link VersionWatchable}, such as the kind of
+   * Listable} and {@link WatchAndWaitable}, such as the kind of
    * operation returned by {@link
    * DefaultKubernetesClient#configMaps()} and the like
    *
    * @param operation a {@link Listable} and a {@link
-   * VersionWatchable} that can report information from a Kubernetes
+   * WatchAndWaitable} that can report information from a Kubernetes
    * cluster; must not be {@code null}
    *
    * @param eventCache an {@link EventCache} <strong>that will be
@@ -344,10 +309,10 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * @see #start()
    */
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
-  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
-                                                                                                                              final EventCache<T> eventCache,
-                                                                                                                              final ScheduledExecutorService synchronizationExecutorService,
-                                                                                                                              final Duration synchronizationInterval) {
+  public <X extends Listable<? extends KubernetesResourceList> & Versionable<WatchAndWaitable<T>>> Reflector(final X operation,
+                                                                                                             final EventCache<T> eventCache,
+                                                                                                             final ScheduledExecutorService synchronizationExecutorService,
+                                                                                                             final Duration synchronizationInterval) {
     this(operation, eventCache, synchronizationExecutorService, synchronizationInterval, null);
   }
 
@@ -355,12 +320,12 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * Creates a new {@link Reflector}.
    *
    * @param <X> a type that is both an appropriate kind of {@link
-   * Listable} and {@link VersionWatchable}, such as the kind of
+   * Listable} and {@link WatchAndWaitable}, such as the kind of
    * operation returned by {@link
    * DefaultKubernetesClient#configMaps()} and the like
    *
    * @param operation a {@link Listable} and a {@link
-   * VersionWatchable} that can report information from a Kubernetes
+   * WatchAndWaitable} that can report information from a Kubernetes
    * cluster; must not be {@code null}
    *
    * @param eventCache an {@link EventCache} <strong>that will be
@@ -392,11 +357,11 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * @see #start()
    */
   @SuppressWarnings("rawtypes") // kubernetes-client's implementations of KubernetesResourceList use raw types
-  public <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> Reflector(final X operation,
-                                                                                                                              final EventCache<T> eventCache,
-                                                                                                                              final ScheduledExecutorService synchronizationExecutorService,
-                                                                                                                              final Duration synchronizationInterval,
-                                                                                                                              final Function<? super Throwable, Boolean> synchronizationErrorHandler) {
+  public <X extends Listable<? extends KubernetesResourceList> & Versionable<WatchAndWaitable<T>>> Reflector(final X operation,
+                                                                                                             final EventCache<T> eventCache,
+                                                                                                             final ScheduledExecutorService synchronizationExecutorService,
+                                                                                                             final Duration synchronizationInterval,
+                                                                                                             final Function<? super Throwable, Boolean> synchronizationErrorHandler) {
     super();
     this.logger = this.createLogger();
     if (this.logger == null) {
@@ -470,7 +435,6 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * monitor.
    *
    * @exception IOException if an error occurs
-   *
    * @see #onClose()
    */
   @Override
@@ -747,7 +711,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
    * Using the {@code operation} supplied at construction time,
    * {@linkplain Listable#list() lists} appropriate Kubernetes
    * resources, and then, on a separate {@link Thread}, {@linkplain
-   * VersionWatchable sets up a watch} on them, calling {@link
+   * WatchAndWaitable sets up a watch} on them, calling {@link
    * EventCache#replace(Collection, Object)} and {@link
    * EventCache#add(Object, AbstractEvent.Type, HasMetadata)} methods
    * as appropriate.
@@ -904,8 +868,8 @@ public class Reflector<T extends HasMetadata> implements Closeable {
                       new Object[] { resourceVersion, this.operation });
         }
         @SuppressWarnings("unchecked")
-        final Versionable<? extends Watchable<? extends Closeable, Watcher<T>>> versionableOperation =
-          (Versionable<? extends Watchable<? extends Closeable, Watcher<T>>>)this.operation;
+        final Versionable<? extends WatchAndWaitable<T>> versionableOperation =
+          (Versionable<? extends WatchAndWaitable<T>>)this.operation;
         this.watch = versionableOperation.withResourceVersion(resourceVersion).watch(new WatchHandler());
         if (logger.isLoggable(Level.FINE)) {
           logger.logp(Level.FINE,
@@ -1107,7 +1071,7 @@ public class Reflector<T extends HasMetadata> implements Closeable {
      * caused this closing to happen; may be {@code null}
      */
     @Override
-    public final void onClose(final KubernetesClientException exception) {
+    public final void onClose(final WatcherException exception) {
       final String cn = this.getClass().getName();
       final String mn = "onClose";
       if (logger.isLoggable(Level.FINER)) {

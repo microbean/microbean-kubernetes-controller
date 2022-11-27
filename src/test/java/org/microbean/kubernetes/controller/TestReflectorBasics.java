@@ -16,42 +16,17 @@
  */
 package org.microbean.kubernetes.controller;
 
-import java.io.Closeable;
-
-import java.time.Duration;
-
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-
-import java.util.function.Consumer;
-
 import io.fabric8.kubernetes.api.model.ConfigMap;
-import io.fabric8.kubernetes.api.model.ConfigMapList;
-import io.fabric8.kubernetes.api.model.HasMetadata;
-import io.fabric8.kubernetes.api.model.KubernetesResourceList;
-import io.fabric8.kubernetes.api.model.Pod;
-
 import io.fabric8.kubernetes.client.DefaultKubernetesClient;
-
-import io.fabric8.kubernetes.client.dsl.Listable;
-import io.fabric8.kubernetes.client.dsl.VersionWatchable;
-
-import org.junit.Ignore;
 import org.junit.Test;
 
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assume.assumeFalse;
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Consumer;
 
-import io.fabric8.kubernetes.client.Watcher;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assume.assumeFalse;
 
 public class TestReflectorBasics {
 

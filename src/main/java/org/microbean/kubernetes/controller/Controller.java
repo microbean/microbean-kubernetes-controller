@@ -16,42 +16,33 @@
  */
 package org.microbean.kubernetes.controller;
 
-import java.io.Closeable;
-import java.io.IOException;
-
-import java.time.Duration;
-
-import java.util.Map;
-import java.util.Objects;
-
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-
-import java.util.function.Consumer;
-import java.util.function.Function;
-
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
-
-import io.fabric8.kubernetes.client.KubernetesClientException; // for javadoc only
-import io.fabric8.kubernetes.client.Watcher;
-
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.Listable;
-import io.fabric8.kubernetes.client.dsl.VersionWatchable;
-
+import io.fabric8.kubernetes.client.dsl.Versionable;
+import io.fabric8.kubernetes.client.dsl.WatchAndWaitable;
 import net.jcip.annotations.Immutable;
 import net.jcip.annotations.ThreadSafe;
-
 import org.microbean.development.annotation.Blocking;
 import org.microbean.development.annotation.NonBlocking;
 
+import java.io.Closeable;
+import java.io.IOException;
+import java.time.Duration;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 /**
  * A convenient combination of a {@link Reflector}, a {@link
- * VersionWatchable} and {@link Listable} implementation, an
+ * WatchAndWaitable} and {@link Listable} implementation, an
  * (internal) {@link EventQueueCollection}, a {@link Map} of known
  * Kubernetes resources and an {@link EventQueue} {@link Consumer}
  * that {@linkplain Reflector#start() mirrors Kubernetes cluster
@@ -90,7 +81,7 @@ import org.microbean.development.annotation.NonBlocking;
  * href="https://github.com/kubernetes/client-go/blob/master/tools/cache/controller.go">{@code
  * controller.go}</a> and <a
  * href="https://github.com/kubernetes/client-go/blob/master/tools/cache/shared_informer.go">{@code
- * shared_informer.go}</a> respectively.</p>
+ * shared_informer.go}</a> respectively.
  *
  * @param <T> a Kubernetes resource type
  *
@@ -173,12 +164,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * Creates a new {@link Controller} but does not {@linkplain
    * #start() start it}.
    *
-   * @param <X> a {@link Listable} and {@link VersionWatchable} that
+   * @param <X> a {@link Listable} and {@link WatchAndWaitable} that
    * will be used by the embedded {@link Reflector}; must not be
    * {@code null}
    *
    * @param operation a {@link Listable} and a {@link
-   * VersionWatchable} that produces Kubernetes events; must not be
+   * WatchAndWaitable} that produces Kubernetes events; must not be
    * {@code null}
    *
    * @param eventQueueConsumer the {@link Consumer} that will process
@@ -195,9 +186,8 @@ public class Controller<T extends HasMetadata> implements Closeable {
    */
   @SuppressWarnings("rawtypes")
   public <X extends Listable<? extends KubernetesResourceList>
-                    & VersionWatchable<? extends Closeable,
-                                                 Watcher<T>>> Controller(final X operation,
-                                                                         final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
+                    & Versionable<WatchAndWaitable<T>>> Controller(final X operation,
+                                                                   final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
     this(operation, null, null, null, eventQueueConsumer);
   }
 
@@ -205,12 +195,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * Creates a new {@link Controller} but does not {@linkplain
    * #start() start it}.
    *
-   * @param <X> a {@link Listable} and {@link VersionWatchable} that
+   * @param <X> a {@link Listable} and {@link WatchAndWaitable} that
    * will be used by the embedded {@link Reflector}; must not be
    * {@code null}
    *
    * @param operation a {@link Listable} and a {@link
-   * VersionWatchable} that produces Kubernetes events; must not be
+   * WatchAndWaitable} that produces Kubernetes events; must not be
    * {@code null}
    *
    * @param knownObjects a {@link Map} containing the last known state
@@ -234,10 +224,9 @@ public class Controller<T extends HasMetadata> implements Closeable {
    */
   @SuppressWarnings("rawtypes")
   public <X extends Listable<? extends KubernetesResourceList>
-                    & VersionWatchable<? extends Closeable,
-                                                 Watcher<T>>> Controller(final X operation,
-                                                                         final Map<Object, T> knownObjects,
-                                                                         final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
+                    & Versionable<WatchAndWaitable<T>>> Controller(final X operation,
+                                                                   final Map<Object, T> knownObjects,
+                                                                   final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
     this(operation, null, null, knownObjects, eventQueueConsumer);
   }
 
@@ -245,12 +234,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * Creates a new {@link Controller} but does not {@linkplain
    * #start() start it}.
    *
-   * @param <X> a {@link Listable} and {@link VersionWatchable} that
+   * @param <X> a {@link Listable} and {@link WatchAndWaitable} that
    * will be used by the embedded {@link Reflector}; must not be
    * {@code null}
    *
    * @param operation a {@link Listable} and a {@link
-   * VersionWatchable} that produces Kubernetes events; must not be
+   * WatchAndWaitable} that produces Kubernetes events; must not be
    * {@code null}
    *
    * @param synchronizationInterval a {@link Duration} representing
@@ -272,10 +261,9 @@ public class Controller<T extends HasMetadata> implements Closeable {
    */
   @SuppressWarnings("rawtypes")
   public <X extends Listable<? extends KubernetesResourceList>
-                    & VersionWatchable<? extends Closeable,
-                                                 Watcher<T>>> Controller(final X operation,
-                                                                         final Duration synchronizationInterval,
-                                                                         final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
+                    & Versionable<WatchAndWaitable<T>>> Controller(final X operation,
+                                                                   final Duration synchronizationInterval,
+                                                                   final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
     this(operation, null, synchronizationInterval, null, eventQueueConsumer);
   }
 
@@ -283,12 +271,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * Creates a new {@link Controller} but does not {@linkplain
    * #start() start it}.
    *
-   * @param <X> a {@link Listable} and {@link VersionWatchable} that
+   * @param <X> a {@link Listable} and {@link WatchAndWaitable} that
    * will be used by the embedded {@link Reflector}; must not be
    * {@code null}
    *
    * @param operation a {@link Listable} and a {@link
-   * VersionWatchable} that produces Kubernetes events; must not be
+   * WatchAndWaitable} that produces Kubernetes events; must not be
    * {@code null}
    *
    * @param synchronizationInterval a {@link Duration} representing
@@ -317,11 +305,10 @@ public class Controller<T extends HasMetadata> implements Closeable {
    */
   @SuppressWarnings("rawtypes")
   public <X extends Listable<? extends KubernetesResourceList>
-                    & VersionWatchable<? extends Closeable,
-                                                 Watcher<T>>> Controller(final X operation,
-                                                                         final Duration synchronizationInterval,
-                                                                         final Map<Object, T> knownObjects,
-                                                                         final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
+                    & Versionable<WatchAndWaitable<T>>> Controller(final X operation,
+                                                                   final Duration synchronizationInterval,
+                                                                   final Map<Object, T> knownObjects,
+                                                                   final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
     this(operation, null, synchronizationInterval, knownObjects, eventQueueConsumer);
   }
 
@@ -329,12 +316,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * Creates a new {@link Controller} but does not {@linkplain
    * #start() start it}.
    *
-   * @param <X> a {@link Listable} and {@link VersionWatchable} that
+   * @param <X> a {@link Listable} and {@link WatchAndWaitable} that
    * will be used by the embedded {@link Reflector}; must not be
    * {@code null}
    *
    * @param operation a {@link Listable} and a {@link
-   * VersionWatchable} that produces Kubernetes events; must not be
+   * WatchAndWaitable} that produces Kubernetes events; must not be
    * {@code null}
    *
    * @param synchronizationExecutorService the {@link
@@ -365,12 +352,11 @@ public class Controller<T extends HasMetadata> implements Closeable {
    */
   @SuppressWarnings("rawtypes")
   public <X extends Listable<? extends KubernetesResourceList>
-                    & VersionWatchable<? extends Closeable,
-                                                 Watcher<T>>> Controller(final X operation,
-                                                                         final ScheduledExecutorService synchronizationExecutorService,
-                                                                         final Duration synchronizationInterval,
-                                                                         final Map<Object, T> knownObjects,
-                                                                         final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
+                    & Versionable<WatchAndWaitable<T>>> Controller(final X operation,
+                                                                   final ScheduledExecutorService synchronizationExecutorService,
+                                                                   final Duration synchronizationInterval,
+                                                                   final Map<Object, T> knownObjects,
+                                                                   final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
     this(operation, synchronizationExecutorService, synchronizationInterval, null, knownObjects, eventQueueConsumer);
   }
 
@@ -378,12 +364,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
    * Creates a new {@link Controller} but does not {@linkplain
    * #start() start it}.
    *
-   * @param <X> a {@link Listable} and {@link VersionWatchable} that
+   * @param <X> a {@link Listable} and {@link WatchAndWaitable} that
    * will be used by the embedded {@link Reflector}; must not be
    * {@code null}
    *
    * @param operation a {@link Listable} and a {@link
-   * VersionWatchable} that produces Kubernetes events; must not be
+   * WatchAndWaitable} that produces Kubernetes events; must not be
    * {@code null}
    *
    * @param synchronizationExecutorService the {@link
@@ -421,13 +407,12 @@ public class Controller<T extends HasMetadata> implements Closeable {
    */
   @SuppressWarnings("rawtypes")
   public <X extends Listable<? extends KubernetesResourceList>
-                    & VersionWatchable<? extends Closeable,
-                                                 Watcher<T>>> Controller(final X operation,
-                                                                         final ScheduledExecutorService synchronizationExecutorService,
-                                                                         final Duration synchronizationInterval,
-                                                                         final Function<? super Throwable, Boolean> errorHandler,
-                                                                         final Map<Object, T> knownObjects,
-                                                                         final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
+                    & Versionable<WatchAndWaitable<T>>> Controller(final X operation,
+                                                                   final ScheduledExecutorService synchronizationExecutorService,
+                                                                   final Duration synchronizationInterval,
+                                                                   final Function<? super Throwable, Boolean> errorHandler,
+                                                                   final Map<Object, T> knownObjects,
+                                                                   final Consumer<? super EventQueue<? extends T>> eventQueueConsumer) {
     super();
     this.logger = this.createLogger();
     if (this.logger == null) {
@@ -841,9 +826,9 @@ public class Controller<T extends HasMetadata> implements Closeable {
 
     
     @SuppressWarnings("rawtypes")
-    private <X extends Listable<? extends KubernetesResourceList> & VersionWatchable<? extends Closeable, Watcher<T>>> ControllerReflector(final X operation,
-                                                                                                                                           final ScheduledExecutorService synchronizationExecutorService,
-                                                                                                                                           final Duration synchronizationInterval, final Function<? super Throwable, Boolean> synchronizationErrorHandler) {
+    private <X extends Listable<? extends KubernetesResourceList> & Versionable<WatchAndWaitable<T>>> ControllerReflector(final X operation,
+                                                                                                                          final ScheduledExecutorService synchronizationExecutorService,
+                                                                                                                          final Duration synchronizationInterval, final Function<? super Throwable, Boolean> synchronizationErrorHandler) {
       super(operation, Controller.this.eventQueueCollection, synchronizationExecutorService, synchronizationInterval, synchronizationErrorHandler);
     }
 

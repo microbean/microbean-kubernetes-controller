@@ -4,13 +4,13 @@
 
   <groupId>org.microbean</groupId>
   <artifactId>microbean-kubernetes-controller</artifactId>
-  <version>0.3.1-SNAPSHOT</version>
+  <version>0.4.0-SNAPSHOT</version>
 
   <parent>
     <groupId>org.microbean</groupId>
     <artifactId>microbean-pluginmanagement-pom</artifactId>
     <version>17</version>
-    <relativePath />
+    <relativePath/>
   </parent>
 
   <name>microBean Kubernetes Controller</name>
@@ -85,7 +85,7 @@
       <dependency>
         <groupId>io.fabric8</groupId>
         <artifactId>kubernetes-client</artifactId>
-        <version>4.11.1</version>
+        <version>5.8.1</version>
         <type>jar</type>
         <exclusions>
           <exclusion>
@@ -98,7 +98,7 @@
       <dependency>
         <groupId>io.fabric8</groupId>
         <artifactId>kubernetes-model</artifactId>
-        <version>4.11.1</version>
+        <version>5.8.1</version>
         <type>jar</type>
         <exclusions>
           <exclusion>
@@ -195,7 +195,7 @@
 
   <build>
 
-    <testResources />
+    <testResources/>
 
     <pluginManagement>
       <plugins>
@@ -233,7 +233,7 @@
   <properties>
 
     <!-- maven-javadoc-plugin properties; see https://maven.apache.org/plugins/maven-javadoc-plugin/javadoc-mojo.html -->
-    <links>https://microbean.github.io/microbean-kubernetes/apidocs/,https://microbean.github.io/microbean-development-annotations/apidocs/,http://jcip.net/annotations/doc/,https://static.javadoc.io/io.fabric8/kubernetes-client/4.1.1,https://static.javadoc.io/io.fabric8/kubernetes-model/4.1.1,https://square.github.io/okhttp/3.x/okhttp/</links>
+    <links> https://microbean.github.io/microbean-kubernetes/apidocs/,https://microbean.github.io/microbean-development-annotations/apidocs/,http://jcip.net/annotations/doc/,https://static.javadoc.io/io.fabric8/kubernetes-client/5.8.1,https://static.javadoc.io/io.fabric8/kubernetes-model/5.8.1,https://square.github.io/okhttp/3.x/okhttp/</links>
 
     <skipClusterTests>true</skipClusterTests>
 

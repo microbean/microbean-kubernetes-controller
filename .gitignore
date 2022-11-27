@@ -1,5 +1,6 @@
 *.class
 *~
+.idea
 nbactions.xml
 src/site/markdown/*.html
 target/
