@@ -85,7 +85,7 @@
       <dependency>
         <groupId>io.fabric8</groupId>
         <artifactId>kubernetes-client</artifactId>
-        <version>5.8.1</version>
+        <version>5.12.4</version>
         <type>jar</type>
         <exclusions>
           <exclusion>
@@ -98,7 +98,7 @@
       <dependency>
         <groupId>io.fabric8</groupId>
         <artifactId>kubernetes-model</artifactId>
-        <version>5.8.1</version>
+        <version>5.12.4</version>
         <type>jar</type>
         <exclusions>
           <exclusion>
@@ -233,7 +233,7 @@
   <properties>
 
     <!-- maven-javadoc-plugin properties; see https://maven.apache.org/plugins/maven-javadoc-plugin/javadoc-mojo.html -->
-    <links> https://microbean.github.io/microbean-kubernetes/apidocs/,https://microbean.github.io/microbean-development-annotations/apidocs/,http://jcip.net/annotations/doc/,https://static.javadoc.io/io.fabric8/kubernetes-client/5.8.1,https://static.javadoc.io/io.fabric8/kubernetes-model/5.8.1,https://square.github.io/okhttp/3.x/okhttp/</links>
+    <links> https://microbean.github.io/microbean-kubernetes/apidocs/,https://microbean.github.io/microbean-development-annotations/apidocs/,http://jcip.net/annotations/doc/,https://static.javadoc.io/io.fabric8/kubernetes-client/5.12.4,https://static.javadoc.io/io.fabric8/kubernetes-model/5.12.4,https://square.github.io/okhttp/3.x/okhttp/</links>
 
     <skipClusterTests>true</skipClusterTests>
 
